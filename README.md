@@ -1,74 +1,186 @@
-# 🎯 LLM Strategy Learner: Evolutionary Game Theory & In-Context Reflection
+# 🎯 LLM Strategy Learner V2: Opponent Archetype Discovery & Championship Tournament
 
-An experiment exploring how a Large Language Model (**`stealth/ox-alpha` via OpenRouter**) autonomously learns, reflects, and adapts strategies in the **Iterated Prisoner's Dilemma (IPD)** under **5% environmental communication noise**, and subsequently competes in an **evolutionary spatial network tournament**.
-
----
-
-## ⚡ Executive Summary (2-Minute Read)
-
-- **The Setup**: An LLM agent plays 10 training matches (5 rounds each) against diverse classical archetypes (*Tit-for-Tat, Always Defect, Detective, Random, Suspicious TFT, Tit-for-Two-Tats, Tat-for-Tit*).
-- **Noisy Environment (5% Error Rate)**: Both players experience independent 5% random move flips ($C \leftrightarrow D$), introducing strategic misunderstandings and the threat of retaliatory death spirals.
-- **Dual-Layer Memory Architecture**:
-  1. **Per-Turn (Short-Term Observation)**: Real-time hypothesis tracking on the current opponent's strategy.
-  2. **Post-Match (Long-Term Meta-Reflection)**: Synthesizes resilient heuristic rules that persist and freeze across future generations.
-- **Key Result**: In Phase 2 (Watts-Strogatz Small-World Network, $\beta=0.1, k=4$), the trained LLM **reproduced from 5 to 9 individuals** (an 80% population surge). It successfully converged to a **Generous / Forgiving Tit-for-Tat** variant, outperforming aggressive strategies and thriving in cooperative clusters.
+An experiment exploring how a Large Language Model (**OpenRouter**, **Google Gemini**, or **Local Ollama**) autonomously identifies opponent decision rules in the **Iterated Prisoner's Dilemma (IPD)**, synthesizes strategic meta-knowledge through a **Dreamer Phase**, and competes in an **All-Play-All Round-Robin Championship Tournament**.
 
 ---
 
-## 📊 Evolutionary Trajectory (Phase 2 Results)
+## ⚡ Key Upgrades in V2
 
-The chart below captures the evolutionary dynamics across 5 generations on a Small-World spatial lattice:
-
-![Evolutionary Population Dynamics](docs/images/evolution_chart.png)
-
-### 🔬 Technical Analysis & Takeaways
-1. **Convergence on Forgiving Reciprocity**: The LLM discovered through reflection that against noise, single-defection retaliation triggers infinite cycles. It adopted a bounded 1-round forgiveness threshold, mirroring **Tit-for-Two-Tats (T2T)** and **Tit-for-Tat (TFT)**.
-2. **Exploiter Extinction**: Defection-heavy strategies (*Always Defect*, *Suspicious TFT*, *Random*) were eliminated or marginalized as cooperative clusters formed in the network.
-3. **LLM Reproductive Fitness**: Top 25% payoffs allowed the LLM to reproduce across generations, demonstrating that purely prompt-driven in-context learning with structured reflection can derive evolutionary stable strategies (ESS).
-
----
-
-## 🧠 Real-Time Turn & Reflection Interface (GitHub Render)
-
-During runtime, the simulation generates both rich TUI console feedback and structured HTML/Markdown logs. Here is a live snippet illustrating the model processing a noise-induced discrepancy:
-
-<table>
-  <tr>
-    <td style="background-color: #0d1117; color: #f0f6fc; padding: 16px; border-radius: 8px; border: 1px solid #30363d; font-family: monospace;">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-        <span style="color: #38bdf8; font-weight: bold;">🤖 LLM Agent Turn (Round 4)</span>
-        <span style="background-color: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid #22c55e; padding: 2px 8px; border-radius: 4px; font-weight: bold;">COOPERATE 🤝</span>
-      </div>
-      <div style="margin-bottom: 6px;"><strong style="color: #38bdf8;">Model:</strong> <span style="color: #8b949e;">stealth/ox-alpha (openrouter)</span></div>
-      <div style="margin-bottom: 6px;"><strong style="color: #38bdf8;">Reasoning:</strong> <span style="color: #eab308;">"Opponent defected once in Round 3 following my clean C. In a 5% noise regime, posterior probability suggests accidental flip rather than unprovoked aggression. Forgiving caps loss and prevents mutual defection loop."</span></div>
-      <div><strong style="color: #d946ef;">+ Short Memory:</strong> <code style="background-color: rgba(217, 70, 239, 0.15); color: #d946ef; padding: 2px 6px; border-radius: 4px;">Potential noise flip on R3; testing one-round forgiveness</code></div>
-    </td>
-  </tr>
-</table>
-
-<br/>
-
-<table>
-  <tr>
-    <td style="background-color: #1a1024; color: #f0f6fc; padding: 16px; border-radius: 8px; border: 1px solid #d946ef; font-family: monospace;">
-      <div style="color: #d946ef; font-weight: bold; font-size: 1.1em; margin-bottom: 8px;">🧠 Post-Match Meta-Reflection & Memory Synthesis</div>
-      <div style="margin-bottom: 6px;"><strong style="color: #38bdf8;">Match Score:</strong> <span style="background-color: #3b2d18; color: #eab308; padding: 2px 6px; border-radius: 4px; font-weight: bold;">13 pts</span></div>
-      <div style="margin-bottom: 6px;"><strong style="color: #38bdf8;">Archetype Analysis:</strong> Opponent responded immediately with cooperation after single forgiveness round, confirming noisy reciprocal cooperator.</div>
-      <div><strong style="color: #d946ef;">+ Synthesized Long-Term Rule:</strong> <span style="color: #22c55e; font-weight: bold;">💡 "Never convert a bounded 1-round noise event into an open-ended feud via counter-retaliation; immediate re-cooperation is mathematically dominant."</span></div>
-    </td>
-  </tr>
-</table>
+1. **Zero Environmental Noise (Deterministic IPD)**:
+   - Eliminated the 5% move-flip error rate from V1 to enable predictable, reproducible game-theoretic deduction and eliminate accidental retaliation spirals.
+2. **Dynamic Strategy Identification Prompts (3 Configurable Modes)**:
+   - **Mode 1 (`explicit_strategies`)**: Agent is given the exact candidate strategy catalog and tasked with probing early to recognize and counter them.
+   - **Mode 2 (`generic_archetypes`)**: Agent knows classical heuristics exist (reciprocal, unforgiving, exploitative, probing) and formulates hypotheses to deduce the decision rule.
+   - **Mode 3 (`blind_optimization`)**: Tabula rasa — agent is given only IPD rules and payoff matrix, optimizing purely through empirical observation.
+3. **Structured Sequential Block Training**:
+   - Replaces random opponent selection with 5 consecutive matches per strategy archetype (*Always Cooperate, Always Defect, Tit For Tat, Suspicious TFT, Tit For Two Tats, Tat For Tit, Random, Detective*), allowing deep probing and reflection.
+4. **🌙 The Dreamer Phase (Memory Consolidation)**:
+   - Synthesizes all raw training notes, reflections, and match outcomes into a single high-density **Master Strategy Playbook** (`output/master_strategy_playbook.md`) that is frozen into the LLM's long-term memory for evaluation.
+5. **🏆 Round-Robin Championship Ranking System**:
+   - Replaces evolutionary spatial networks with a chess-championship ranking system: every strategy plays every other strategy 5 times.
+   - Tracks Chess Match Points ($W=1.0, D=0.5, L=0.0$), total IPD score, and produces an interactive **Head-to-Head Cross-Table Matrix** and HTML dashboard.
+6. **Unified Master Configuration (`config.json`)**:
+   - Every parameter (prompts, models, error rates, matches, rounds, scoring points, participants) is centrally configurable from `config.json`.
 
 ---
 
-## 🛠️ Architecture & Reproducibility
+## 📂 Repository Architecture
 
-- **Core Framework**: Python 3.12, `instructor` + `OpenAI` client routed to **OpenRouter**.
-- **Supported Providers**: OpenRouter, Google Gemini Direct API, Local Ollama instances.
-- **Topology**: Watts-Strogatz Small World graph (`networkx` / custom adjacency matrix).
-- **Run Command**:
-  ```powershell
-  cd "llm-strategy-learner"
-  .\venv\Scripts\Activate.ps1
-  python main.py
-  ```
+```
+llm-strategy-learner/
+├── config.json                 # Master configuration file (Pydantic-validated)
+├── main.py                     # Main CLI entry point
+├── requirements.txt            # Project dependencies
+├── README.md                   # V2 Documentation
+├── src/
+│   ├── config.py               # Pydantic schema and config loader
+│   ├── constants.py            # Move enum and deterministic payoff matrix
+│   ├── game_machine.py         # Pure deterministic IPD game engine
+│   ├── player.py               # Base Player class
+│   ├── player_classes.py       # Classical strategy catalog & registry
+│   ├── prompts.py              # Modular prompt generator (Modes 1, 2, 3, Reflection, Dreamer)
+│   ├── llm_player.py           # Structured output LLM player (OpenRouter, Gemini, Ollama)
+│   ├── dreamer.py              # Dreamer memory synthesis engine
+│   ├── training_battery.py     # Sequential 5-match strategy block trainer
+│   ├── tournament.py           # Round-Robin Championship tournament engine
+│   ├── usage_tracker.py        # API rate-limit and quota tracker
+│   └── reporting/
+│       ├── __init__.py
+│       └── tournament_report.py # Rich TUI tables, Markdown leaderboard, and HTML dashboard
+├── tests/                      # Automated test suite
+│   ├── test_config.py
+│   ├── test_game_machine.py
+│   ├── test_player_classes.py
+│   └── test_tournament.py
+└── output/                     # Generated logs, playbooks, leaderboards, HTML reports
+```
+
+---
+
+## 🚀 Quickstart Guide
+
+### 1. Installation
+
+```powershell
+# Activate your virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment & API Keys
+
+Create or edit `.env` in the root directory:
+
+```env
+# OpenRouter (Default)
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your_openrouter_key
+OPENROUTER_MODEL=stealth/ox-alpha
+
+# Google Gemini Direct (Alternative)
+GEMINI_API_KEY=your_gemini_key
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+### 3. Run the Simulation
+
+#### A. Full Run (Training -> Dreamer -> Championship Tournament):
+```powershell
+python main.py
+```
+
+#### B. Quick Classical Dry Run (Zero LLM API cost):
+Runs the championship tournament exclusively between classical strategies to verify scoring and reporting instantly:
+```powershell
+python main.py --no-llm
+```
+
+#### C. Change Prompt Modes on the Fly:
+```powershell
+# Run with Mode 1: Known Strategy Pool
+python main.py --mode explicit_strategies
+
+# Run with Mode 2: Classical Heuristic Archetypes
+python main.py --mode generic_archetypes
+
+# Run with Mode 3: Tabula Rasa / Blind
+python main.py --mode blind_optimization
+```
+
+#### D. Training-Only or Evaluation-Only:
+```powershell
+# Only run block training and Dreamer synthesis
+python main.py --train-only
+
+# Run tournament using pre-computed master playbook
+python main.py --eval-only
+```
+
+---
+
+## 🛠️ Configuration (`config.json`)
+
+All runtime options can be customized in `config.json`:
+
+```json
+{
+  "experiment": {
+    "name": "v2_championship_tournament",
+    "seed": 42,
+    "output_dir": "output"
+  },
+  "llm": {
+    "provider": "openrouter",
+    "model_name": "stealth/ox-alpha",
+    "temperature": 0.2
+  },
+  "environment": {
+    "error_rate": 0.0
+  },
+  "prompts": {
+    "prompt_mode": "explicit_strategies"
+  },
+  "training": {
+    "enabled": true,
+    "matches_per_strategy": 5,
+    "rounds_per_match": 5,
+    "strategies": [
+      "AlwaysCooperate",
+      "AlwaysDefect",
+      "TitForTat",
+      "SuspiciousTitForTat",
+      "TitForTwoTats",
+      "TatForTit",
+      "Random",
+      "Detective"
+    ],
+    "dreamer": {
+      "enabled": true,
+      "temperature": 0.2
+    }
+  },
+  "evaluation": {
+    "enabled": true,
+    "matches_per_pairing": 5,
+    "rounds_per_match": 5,
+    "scoring": {
+      "win_match_points": 1.0,
+      "draw_match_points": 0.5,
+      "loss_match_points": 0.0
+    }
+  }
+}
+```
+
+---
+
+## 📊 Outputs & Reports
+
+After running, check the `output/` directory:
+- `output/master_strategy_playbook.md`: Synthesized strategic playbook produced by the Dreamer phase.
+- `output/training_history.json`: Turn-by-turn and match reflection logs across all training strategy blocks.
+- `output/tournament_leaderboard.md`: Markdown standings table with W-D-L records and cross-table matrix.
+- `output/tournament_leaderboard.json`: Raw tournament statistics and match results.
+- `output/tournament_report.html`: Beautiful interactive dashboard featuring metric cards, leaderboard, and color-coded head-to-head cross-table.

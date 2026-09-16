@@ -1,185 +1,180 @@
-import sys
+import argparse
 import os
+import sys
+import io
+from dotenv import load_dotenv
+
+# Ensure Windows stdout handles UTF-8 (emojis, unicode tables)
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Ensure the simulation can find modules in the src/ directory
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
-from collections import Counter
-from tqdm import tqdm
 
-from src.usage_tracker import DailyLimitReachedException
-from src.llm_player import LLMPlayer
+from src.config import load_config
+from src.player_classes import get_strategy_class, STRATEGY_REGISTRY
 from src.training_battery import TrainingBattery
-from src.player_classes import (
-    AlwaysCooperatePlayer,
-    AlwaysDefectPlayer,
-    TitForTatPlayer,
-    SuspiciousTitForTatPlayer,
-    TitForTwoTatsPlayer,
-    TatForTitPlayer,
-    RandomPlayer,
-)
-from src.game_machine import GameMachine
-from src.graph import FullyConnectedGraph, CycleGraph, SmallWorldGraph, BarabasiAlbertGraph, ErdosRenyiGraph, GridGraph
-from src.plotter import Plotter
+from src.tournament import RoundRobinTournament
+from src.reporting.tournament_report import TournamentReporter
 
-CONSECUTIVE_MOVES = 5
-EPOCHS = 10
-OUTPUT_DIR = "output"
 
-def generate_players(instances_per_class=10):
-    classes = [
-        AlwaysCooperatePlayer,
-        AlwaysDefectPlayer,
-        TitForTatPlayer,
-        SuspiciousTitForTatPlayer,
-        TitForTwoTatsPlayer,
-        TatForTitPlayer,
-        RandomPlayer,
-    ]
-    players = []
-    for cls in classes:
-        for _ in range(instances_per_class):
-            players.append(cls())
-    return players
+def parse_args():
+    parser = argparse.ArgumentParser(description="LLM Strategy Learner V2")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.json",
+        help="Path to global configuration JSON file",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["explicit_strategies", "generic_archetypes", "blind_optimization"],
+        default=None,
+        help="Override prompt mode (explicit_strategies, generic_archetypes, or blind_optimization)",
+    )
+    parser.add_argument(
+        "--train-only",
+        action="store_true",
+        help="Run only Phase 1 (Training) & Dreamer synthesis",
+    )
+    parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help="Run only Phase 2 (Championship Tournament)",
+    )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Run tournament exclusively with classical strategies (zero API cost / dry run)",
+    )
+    return parser.parse_args()
 
-def run_epoch(players, game_machine, game_graph):
-    results = {}
-    for edge in game_graph.get_edges():
-        player_1 = players[edge[0]]
-        player_2 = players[edge[1]]
-        for i in range(CONSECUTIVE_MOVES):
-            game_machine.play_game(player_1, player_2)
-        results[(edge[0], edge[1])] = (player_1.score, player_2.score)
-        player_1.finish_game()
-        player_2.finish_game()
-    return results
-
-def simulation_step(players, death_threshold=0.25, reproduction_threshold=0.75):
-    import random
-    n = len(players)
-
-    players_copy = players.copy()
-    random.shuffle(players_copy)
-    players_copy.sort(key=lambda x: x.run_score, reverse=False)
-    for i, player in enumerate(players_copy):
-        player.survivability_score = i / (n - 1) if n > 1 else 0.5
-
-    new_generation = []
-    for i in range(n):
-        player_i = players[i]
-        if player_i.survivability_score < death_threshold:
-            pass
-        elif (
-            player_i.survivability_score >= death_threshold
-            and player_i.survivability_score < reproduction_threshold
-        ):
-            new_generation.append(player_i)
-        else:
-            new_generation.append(player_i)
-            new_generation.append(player_i.copy())
-
-    for player in new_generation:
-        player.run_score = 0
-
-    return new_generation
 
 def main():
+    args = parse_args()
+    config = load_config(args.config)
+
+    # CLI overrides
+    if args.mode:
+        config.prompts.prompt_mode = args.mode
+
     try:
         from rich.console import Console
         from rich.panel import Panel
         console = Console()
-        console.print(Panel.fit(
-            "[bold cyan]🎯 LLM Strategy Learner[/bold cyan]\n[dim]Iterated Prisoner's Dilemma with Real-time Reflection[/dim]",
-            border_style="cyan"
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold cyan]🎯 LLM Strategy Learner V2[/bold cyan]\n"
+                f"[dim]Opponent Archetype Discovery & Round-Robin Championship[/dim]\n"
+                f"[yellow]Prompt Mode:[/yellow] [bold]{config.prompts.prompt_mode}[/bold] | "
+                f"[green]Noise:[/green] {config.environment.error_rate * 100:.0f}%",
+                border_style="cyan",
+            )
+        )
     except Exception:
-        print("=== LLM Strategy Learner ===")
+        print(f"=== LLM Strategy Learner V2 (Mode: {config.prompts.prompt_mode}) ===")
 
-    provider = os.getenv("LLM_PROVIDER")
-    if not provider:
-        use_gemini = os.getenv("USE_GEMINI", "false").lower() in ("true", "1", "yes")
-        provider = "gemini" if use_gemini else "ollama"
+    llm_agent = None
+    if not args.no_llm:
+        from src.llm_player import LLMPlayer
+        llm_agent = LLMPlayer(
+            name="LLM Learner",
+            provider=config.llm.provider,
+            model_name=config.llm.model_name,
+            prompt_mode=config.prompts.prompt_mode,
+            known_strategies=config.training.strategies,
+            temperature=config.llm.temperature,
+            max_rpm=config.llm.rate_limit.max_rpm,
+            max_rpd=config.llm.rate_limit.max_rpd,
+        )
+        print(f"Provider: {llm_agent.provider} | Model: {llm_agent.model_name} | Mode: {llm_agent.prompt_mode}")
 
-    llm_agent = LLMPlayer(provider=provider)
-    print(f"Provider: {llm_agent.provider} | Model: {llm_agent.model_name}")
-    print("\n=== Phase 1: Training ===")
-    
-    memory_file = os.path.join(OUTPUT_DIR, "agent_memory.txt")
-    if os.path.exists(memory_file):
-        with open(memory_file, "r", encoding="utf-8") as f:
-            lines = [line.strip().lstrip("- ").strip() for line in f if line.strip()]
-            if lines:
-                llm_agent.long_lasting_notes = lines
-                print(f"Loaded {len(lines)} memory entries from {memory_file}")
-    
-    # Run training for 10 matches (5 rounds per match) against random classical strategies with 5% noise
-    training = TrainingBattery(llm_player=llm_agent, epochs=10, moves_per_match=5, error_rate=0.05)
-    
-    try:
-        training.run_training(output_dir=OUTPUT_DIR)
-    except DailyLimitReachedException as e:
-        print(f"\nTraining interrupted: {e}")
-        print("Saving current progress and halting execution for today.")
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        with open(memory_file, "w", encoding="utf-8") as f:
-            f.write(llm_agent._format_notes(llm_agent.long_lasting_notes) + "\n")
-        print(f"Agent memory saved to {memory_file}")
-        sys.exit(0)
-    
-    # If training completes successfully without exception
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    with open(memory_file, "w", encoding="utf-8") as f:
-        f.write(llm_agent._format_notes(llm_agent.long_lasting_notes) + "\n")
-    print(f"Agent memory saved to {memory_file}")
-    
-    print("\nTraining complete. Freezing notes for evaluation.")
-    llm_agent.freeze_notes = True
-    print(f"Final Long-lasting Notes:\n{llm_agent._format_notes(llm_agent.long_lasting_notes)}\n")
-    
-    print("=== Phase 2: Evaluation ===")
-    game_plotter = Plotter()
-    
-    # Create the population: 5 instances of each classical strategy to avoid excessive API calls
-    players = generate_players(instances_per_class=5)
-    
-    # Add 5 instances of the trained LLM agent
-    for _ in range(5):
-        players.append(llm_agent.copy())
-        
-    baseline_nodes = len(players)
-    game_graph = SmallWorldGraph(baseline_nodes, k=4, p=0.1) # Small World reduces edge count significantly vs Fully Connected
-    game_machine = GameMachine(error_rate=0.05)
-    run_name = "LLM Learner vs Classical (Small World)"
-    
-    game_plotter.record_epoch(run_name, 0, players)
-    
-    EVAL_EPOCHS = 5
-    for i in tqdm(range(EVAL_EPOCHS), desc=f"Simulating {run_name}", unit="epoch"):
-        run_epoch(players, game_machine, game_graph)
-        players = simulation_step(players)
-        game_plotter.record_epoch(run_name, i + 1, players)
-        
-    counts = Counter(p.strategy_name for p in players)
-    print(f"\nFinal population for {run_name}:")
-    for strategy, count in counts.most_common():
-        print(f"  {strategy}: {count}")
-    print("Generating CSVs, Plots, Markdown, and HTML report...")
-    game_plotter.export_and_plot(output_dir=OUTPUT_DIR)
-    
-    try:
-        from src.match_logger import global_logger
-        global_logger.export_html()
-        print(f"Generated Markdown log: {global_logger.md_file}")
-        print(f"Generated HTML report:   {global_logger.html_file}")
-    except Exception as e:
-        print(f"HTML export error: {e}")
+    # =========================================================================
+    # Phase 1: Structured Sequential Block Training & Dreamer Phase
+    # =========================================================================
+    if config.training.enabled and not args.eval_only and llm_agent is not None:
+        training_battery = TrainingBattery(
+            llm_player=llm_agent,
+            strategies=config.training.strategies,
+            matches_per_strategy=config.training.matches_per_strategy,
+            rounds_per_match=config.training.rounds_per_match,
+            error_rate=config.environment.error_rate,
+            dreamer_enabled=config.training.dreamer.enabled,
+            dreamer_temperature=config.training.dreamer.temperature,
+        )
+        training_history, master_playbook = training_battery.run_training(
+            output_dir=config.experiment.output_dir
+        )
+    elif args.eval_only and llm_agent is not None:
+        # Load existing master playbook if available
+        playbook_file = os.path.join(config.experiment.output_dir, "master_strategy_playbook.md")
+        if os.path.exists(playbook_file):
+            with open(playbook_file, "r", encoding="utf-8") as f:
+                saved_playbook = f.read()
+            llm_agent.set_master_playbook(saved_playbook)
+            print(f"Loaded existing Master Strategy Playbook from {playbook_file}")
+        llm_agent.freeze_notes = True
 
-    print("Export complete. Check the 'output' directory.")
+    if args.train_only:
+        print("\nTraining-only mode complete. Exiting before evaluation.")
+        return
+
+    # =========================================================================
+    # Phase 2: Round-Robin Championship Tournament
+    # =========================================================================
+    if config.evaluation.enabled:
+        tournament_players = []
+
+        for p_name in config.evaluation.participants:
+            if p_name.lower() in ("llmplayer", "llm_player", "llmlearner", "llmagent"):
+                if llm_agent is not None:
+                    # Freeze notes before tournament
+                    llm_agent.freeze_notes = True
+                    tournament_players.append(llm_agent)
+            else:
+                strat_cls = get_strategy_class(p_name)
+                tournament_players.append(strat_cls())
+
+        tournament = RoundRobinTournament(
+            players=tournament_players,
+            matches_per_pairing=config.evaluation.matches_per_pairing,
+            rounds_per_match=config.evaluation.rounds_per_match,
+            error_rate=config.environment.error_rate,
+            scoring_config=config.evaluation.scoring,
+        )
+
+        tournament_results = tournament.run_tournament()
+
+        # =========================================================================
+        # Reporting: Rich TUI, JSON, Markdown, HTML Dashboard
+        # =========================================================================
+        reporter = TournamentReporter(
+            tournament_data=tournament_results,
+            output_dir=config.experiment.output_dir,
+        )
+
+        if config.reporting.terminal_style == "rich":
+            reporter.display_rich_console()
+
+        if config.reporting.export_json:
+            reporter.export_json()
+
+        if config.reporting.export_markdown:
+            reporter.export_markdown()
+
+        if config.reporting.export_html:
+            reporter.export_html()
+
+        print(f"\nTournament complete! All outputs saved to '{config.experiment.output_dir}' directory.")
+
 
 if __name__ == "__main__":
     main()

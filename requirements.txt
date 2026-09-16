@@ -8,3 +8,7 @@ tqdm
 networkx
 pandas
 python-dotenv
+rich
+pytest
+tabulate
+
