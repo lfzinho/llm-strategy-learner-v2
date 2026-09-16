@@ -58,6 +58,8 @@ class LLMPlayer(Player):
         provider: str = "openrouter",
         model_name: Optional[str] = None,
         prompt_mode: str = "explicit_strategies",
+        custom_system_prompts: Optional[Dict[str, str]] = None,
+        custom_reflection_template: Optional[str] = None,
         known_strategies: Optional[List[str]] = None,
         temperature: float = 0.2,
         max_rpm: int = 30,
@@ -67,6 +69,8 @@ class LLMPlayer(Player):
         self.strategy_name = "LLM Strategy Learner V2"
         self.provider = (provider or os.getenv("LLM_PROVIDER", "openrouter")).lower()
         self.prompt_mode = prompt_mode
+        self.custom_system_prompts = custom_system_prompts
+        self.custom_reflection_template = custom_reflection_template
         self.known_strategies = known_strategies
         self.temperature = temperature
 
@@ -127,6 +131,7 @@ class LLMPlayer(Player):
             short_lasting_notes=self.short_lasting_notes,
             master_playbook=self.master_playbook,
             mode=self.prompt_mode,
+            custom_system_prompts=self.custom_system_prompts,
             known_strategies=self.known_strategies,
         )
 
@@ -218,6 +223,7 @@ class LLMPlayer(Player):
             short_lasting_notes=self.short_lasting_notes,
             long_lasting_notes=self.long_lasting_notes,
             actual_opponent_name=self.last_opponent_name,
+            custom_template=self.custom_reflection_template,
         )
 
         try:
@@ -284,6 +290,8 @@ class LLMPlayer(Player):
             provider=self.provider,
             model_name=self.model_name,
             prompt_mode=self.prompt_mode,
+            custom_system_prompts=self.custom_system_prompts,
+            custom_reflection_template=self.custom_reflection_template,
             known_strategies=self.known_strategies,
             temperature=self.temperature,
         )

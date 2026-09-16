@@ -13,9 +13,10 @@ class Dreamer:
     into a single high-density Master Strategy Playbook.
     """
 
-    def __init__(self, llm_player, temperature: float = 0.2):
+    def __init__(self, llm_player, temperature: float = 0.2, custom_template: Optional[str] = None):
         self.llm_player = llm_player
         self.temperature = temperature
+        self.custom_template = custom_template
 
     def synthesize_master_playbook(
         self,
@@ -46,7 +47,11 @@ class Dreamer:
             )
 
         summary_text = "\n".join(summary_lines)
-        prompt = build_dreamer_prompt(training_summary=summary_text, raw_notes=all_raw_notes)
+        prompt = build_dreamer_prompt(
+            training_summary=summary_text,
+            raw_notes=all_raw_notes,
+            custom_template=self.custom_template,
+        )
 
         print("\n" + "=" * 60)
         print("🌙 ENTERING DREAMER PHASE: Consolidating Memory into Master Playbook...")

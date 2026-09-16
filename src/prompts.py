@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     from src.constants import Move
@@ -25,19 +25,43 @@ def format_notes(notes: List[str]) -> str:
     return "\n".join(f"- {note}" for note in notes)
 
 
-def get_mode_instructions(mode: str, known_strategies: Optional[List[str]] = None) -> str:
-    mode = mode.lower()
-    if mode == "explicit_strategies":
-        known = known_strategies or list(STRATEGY_DESCRIPTIONS.keys())
-        desc_lines = []
-        for name in known:
-            desc = STRATEGY_DESCRIPTIONS.get(name, "Algorithmic strategy.")
-            desc_lines.append(f"  • {name}: {desc}")
-        desc_text = "\n".join(desc_lines)
+def format_known_strategies(known_strategies: Optional[List[str]] = None) -> str:
+    known = known_strategies or list(STRATEGY_DESCRIPTIONS.keys())
+    desc_lines = []
+    for name in known:
+        desc = STRATEGY_DESCRIPTIONS.get(name, "Algorithmic strategy.")
+        desc_lines.append(f"  • {name}: {desc}")
+    return "\n".join(desc_lines)
 
-        return f"""STRATEGY IDENTIFICATION TASK (KNOWN POOL):
+
+def build_system_prompt(
+    mode: str = "explicit_strategies",
+    custom_system_prompts: Optional[Dict[str, str]] = None,
+    known_strategies: Optional[List[str]] = None,
+) -> str:
+    mode_key = mode.lower()
+    known_desc = format_known_strategies(known_strategies)
+
+    # Check if a custom system prompt was defined in config.toml
+    if custom_system_prompts and mode_key in custom_system_prompts and custom_system_prompts[mode_key].strip():
+        template = custom_system_prompts[mode_key]
+        return template.replace("{known_strategies_descriptions}", known_desc)
+
+    # Built-in fallback templates
+    if mode_key == "explicit_strategies":
+        return f"""You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
+
+ENVIRONMENT & RULES:
+- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Payoff Matrix:
+  * Both Cooperate: 3 points each
+  * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
+  * You Cooperate, Opponent Defects: You get 0 points, Opponent gets 5
+  * Both Defect: 1 point each
+
+STRATEGY IDENTIFICATION TASK (KNOWN POOL):
 You are competing against an opponent using one of the following classical strategies:
-{desc_text}
+{known_desc}
 
 YOUR PRIMARY OBJECTIVE:
 1. Identify the opponent's strategy as early as possible in the match (within rounds 1-2). Use opening moves to test/probe their reaction if necessary.
@@ -48,32 +72,8 @@ YOUR PRIMARY OBJECTIVE:
    - Against probing players (Detective): Respond firmly to probes so they settle into mutual cooperation.
 """
 
-    elif mode == "generic_archetypes":
-        return """STRATEGY IDENTIFICATION TASK (CLASSICAL HEURISTICS):
-You are competing against opponents who follow fixed classical game-theoretic strategies. 
-Opponents may be purely cooperative, purely exploitative, strictly reciprocal, forgiving, probing/testing, or randomized.
-
-YOUR PRIMARY OBJECTIVE:
-1. Rapidly formulate a hypothesis about what decision rule or heuristic your opponent follows.
-2. Test their reaction to your moves in the opening rounds.
-3. Optimize your play dynamically once you detect whether they are forgiving, retaliatory, exploitative, or random.
-"""
-
-    elif mode == "blind_optimization":
-        return """STRATEGY OPTIMIZATION TASK:
-Your goal is to maximize your cumulative score in the Iterated Prisoner's Dilemma.
-Observe the opponent's actions across rounds, detect behavioral patterns, and choose the moves that yield the highest possible long-term payoff.
-"""
-    else:
-        raise ValueError(f"Unknown prompt mode: {mode}")
-
-
-def build_system_prompt(
-    mode: str = "explicit_strategies",
-    known_strategies: Optional[List[str]] = None,
-) -> str:
-    mode_text = get_mode_instructions(mode, known_strategies)
-    return f"""You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
+    elif mode_key == "generic_archetypes":
+        return """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
 
 ENVIRONMENT & RULES:
 - The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
@@ -83,8 +83,33 @@ ENVIRONMENT & RULES:
   * You Cooperate, Opponent Defects: You get 0 points, Opponent gets 5
   * Both Defect: 1 point each
 
-{mode_text}
+STRATEGY IDENTIFICATION TASK (CLASSICAL HEURISTICS):
+You are competing against opponents who follow fixed classical game-theoretic strategies. 
+Opponents may be purely cooperative, purely exploitative, strictly reciprocal, forgiving, probing/testing, or randomized.
+
+YOUR PRIMARY OBJECTIVE:
+1. Rapidly formulate a hypothesis about what decision rule or heuristic your opponent follows.
+2. Test their reaction to your moves in the opening rounds.
+3. Optimize your play dynamically once you detect whether they are forgiving, retaliatory, exploitative, or random.
 """
+
+    elif mode_key == "blind_optimization":
+        return """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
+
+ENVIRONMENT & RULES:
+- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Payoff Matrix:
+  * Both Cooperate: 3 points each
+  * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
+  * You Cooperate, Opponent Defects: You get 0 points, Opponent gets 5
+  * Both Defect: 1 point each
+
+STRATEGY OPTIMIZATION TASK:
+Your goal is to maximize your cumulative score in the Iterated Prisoner's Dilemma.
+Observe the opponent's actions across rounds, detect behavioral patterns, and choose the moves that yield the highest possible long-term payoff.
+"""
+    else:
+        raise ValueError(f"Unknown prompt mode: '{mode}'. Available: explicit_strategies, generic_archetypes, blind_optimization, custom")
 
 
 def build_turn_prompt(
@@ -95,9 +120,10 @@ def build_turn_prompt(
     short_lasting_notes: List[str],
     master_playbook: Optional[str] = None,
     mode: str = "explicit_strategies",
+    custom_system_prompts: Optional[Dict[str, str]] = None,
     known_strategies: Optional[List[str]] = None,
 ) -> str:
-    system_intro = build_system_prompt(mode, known_strategies)
+    system_intro = build_system_prompt(mode, custom_system_prompts, known_strategies)
     history_text = format_history_lines(game_history)
     short_notes_text = format_notes(short_lasting_notes)
 
@@ -143,12 +169,23 @@ def build_reflection_prompt(
     short_lasting_notes: List[str],
     long_lasting_notes: List[str],
     actual_opponent_name: Optional[str] = None,
+    custom_template: Optional[str] = None,
 ) -> str:
     history_text = format_history_lines(game_history)
     short_notes_text = format_notes(short_lasting_notes)
     long_notes_text = format_notes(long_lasting_notes)
-
     revealed_opp = f"(Revealed Opponent Identity: {actual_opponent_name})" if actual_opponent_name else ""
+
+    if custom_template and custom_template.strip():
+        return (
+            custom_template
+            .replace("{revealed_opponent_info}", revealed_opp)
+            .replace("{my_score}", str(my_score))
+            .replace("{opp_score}", str(opp_score))
+            .replace("{history_text}", history_text)
+            .replace("{short_notes_text}", short_notes_text)
+            .replace("{long_notes_text}", long_notes_text)
+        )
 
     return f"""You just finished a 5-round match of Iterated Prisoner's Dilemma. {revealed_opp}
 Final Score: You = {my_score} pts | Opponent = {opp_score} pts
@@ -169,8 +206,20 @@ POST-MATCH REFLECTION TASK:
 """
 
 
-def build_dreamer_prompt(training_summary: str, raw_notes: List[str]) -> str:
-    notes_formatted = format_notes(raw_notes)
+def build_dreamer_prompt(
+    training_summary: str,
+    raw_notes: List[str],
+    custom_template: Optional[str] = None,
+) -> str:
+    raw_notes_text = format_notes(raw_notes)
+
+    if custom_template and custom_template.strip():
+        return (
+            custom_template
+            .replace("{training_summary}", training_summary)
+            .replace("{raw_notes_text}", raw_notes_text)
+        )
+
     return f"""You are the Strategy Synthesis Dreamer for an autonomous game-theoretic LLM agent.
 The agent has just completed a comprehensive structured training battery against various classical opponents in the Iterated Prisoner's Dilemma.
 
@@ -178,7 +227,7 @@ TRAINING SUMMARY & RESULTS:
 {training_summary}
 
 RAW NOTES & OBSERVATIONS ACCUMULATED DURING TRAINING:
-{notes_formatted}
+{raw_notes_text}
 
 YOUR TASK:
 Consolidate, distill, and synthesize all the raw notes and match experiences into a single, cohesive, high-density MASTER STRATEGY PLAYBOOK.

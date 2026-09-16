@@ -30,6 +30,7 @@ class TrainingBattery:
         error_rate: float = 0.0,
         dreamer_enabled: bool = True,
         dreamer_temperature: float = 0.2,
+        dreamer_custom_template: Optional[str] = None,
     ):
         self.llm_player = llm_player
         self.matches_per_strategy = matches_per_strategy
@@ -37,6 +38,7 @@ class TrainingBattery:
         self.game_machine = GameMachine(error_rate=error_rate)
         self.dreamer_enabled = dreamer_enabled
         self.dreamer_temperature = dreamer_temperature
+        self.dreamer_custom_template = dreamer_custom_template
 
         self.strategy_names = strategies or [
             "AlwaysCooperate",
@@ -114,7 +116,11 @@ class TrainingBattery:
 
         master_playbook = None
         if self.dreamer_enabled:
-            dreamer = Dreamer(self.llm_player, temperature=self.dreamer_temperature)
+            dreamer = Dreamer(
+                self.llm_player,
+                temperature=self.dreamer_temperature,
+                custom_template=self.dreamer_custom_template,
+            )
             master_playbook = dreamer.synthesize_master_playbook(self.history_log, output_dir=output_dir)
 
         return self.history_log, master_playbook

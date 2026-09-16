@@ -30,8 +30,8 @@ def parse_args():
     parser.add_argument(
         "--config",
         type=str,
-        default="config.json",
-        help="Path to global configuration JSON file",
+        default="config.toml",
+        help="Path to global configuration TOML file",
     )
     parser.add_argument(
         "--mode",
@@ -90,6 +90,8 @@ def main():
             provider=config.llm.provider,
             model_name=config.llm.model_name,
             prompt_mode=config.prompts.prompt_mode,
+            custom_system_prompts=config.prompts.system_prompts,
+            custom_reflection_template=config.prompts.reflection.get("prompt_template"),
             known_strategies=config.training.strategies,
             temperature=config.llm.temperature,
             max_rpm=config.llm.rate_limit.max_rpm,
@@ -109,6 +111,7 @@ def main():
             error_rate=config.environment.error_rate,
             dreamer_enabled=config.training.dreamer.enabled,
             dreamer_temperature=config.training.dreamer.temperature,
+            dreamer_custom_template=config.prompts.dreamer.get("prompt_template"),
         )
         training_history, master_playbook = training_battery.run_training(
             output_dir=config.experiment.output_dir

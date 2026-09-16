@@ -1,7 +1,13 @@
-import json
 import os
+import json
 from typing import Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator
+
+# Python 3.11+ built-in tomllib
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore
 
 
 class ExperimentConfig(BaseModel):
@@ -17,7 +23,7 @@ class LLMRateLimitConfig(BaseModel):
 
 class LLMConfig(BaseModel):
     provider: Literal["openrouter", "gemini", "ollama"] = "openrouter"
-    model_name: Optional[str] = None
+    model_name: Optional[str] = "stealth/ox-alpha"
     temperature: float = 0.2
     max_retries: int = 3
     rate_limit: LLMRateLimitConfig = Field(default_factory=LLMRateLimitConfig)
@@ -42,12 +48,14 @@ class EnvironmentConfig(BaseModel):
         return v
 
 
-PromptModeType = Literal["explicit_strategies", "generic_archetypes", "blind_optimization"]
+PromptModeType = Literal["explicit_strategies", "generic_archetypes", "blind_optimization", "custom"]
 
 
 class PromptsConfig(BaseModel):
     prompt_mode: PromptModeType = "explicit_strategies"
-    modes_info: Optional[Dict[str, str]] = None
+    system_prompts: Dict[str, str] = Field(default_factory=dict)
+    reflection: Dict[str, str] = Field(default_factory=dict)
+    dreamer: Dict[str, str] = Field(default_factory=dict)
 
 
 class DreamerConfig(BaseModel):
@@ -118,12 +126,33 @@ class MasterConfig(BaseModel):
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
 
 
-def load_config(config_path: str = "config.json") -> MasterConfig:
-    """Loads and validates configuration from a JSON file, falling back to defaults if file is missing."""
+def load_config(config_path: Optional[str] = None) -> MasterConfig:
+    """Loads configuration from config.toml (or config.json), validating with Pydantic."""
+    if not config_path:
+        # Default priority: config.toml > config.json
+        if os.path.exists("config.toml"):
+            config_path = "config.toml"
+        elif os.path.exists("config.json"):
+            config_path = "config.json"
+        else:
+            config_path = "config.toml"
+
     if os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw_data = json.load(f)
+        if config_path.endswith(".toml"):
+            with open(config_path, "rb") as f:
+                raw_data = tomllib.load(f)
+        else:
+            with open(config_path, "r", encoding="utf-8") as f:
+                raw_data = json.load(f)
+
+        # Convert payoff matrix values from list to tuple if needed
+        if "environment" in raw_data and "payoff_matrix" in raw_data["environment"]:
+            pm = raw_data["environment"]["payoff_matrix"]
+            for k, v in pm.items():
+                if isinstance(v, list):
+                    pm[k] = tuple(v)
+
         return MasterConfig.model_validate(raw_data)
     else:
-        print(f"Warning: Configuration file '{config_path}' not found. Using default configuration.")
+        print(f"Warning: Configuration file '{config_path}' not found. Using default MasterConfig.")
         return MasterConfig()

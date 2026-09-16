@@ -19,8 +19,8 @@ An experiment exploring how a Large Language Model (**OpenRouter**, **Google Gem
 5. **🏆 Round-Robin Championship Ranking System**:
    - Replaces evolutionary spatial networks with a chess-championship ranking system: every strategy plays every other strategy 5 times.
    - Tracks Chess Match Points ($W=1.0, D=0.5, L=0.0$), total IPD score, and produces an interactive **Head-to-Head Cross-Table Matrix** and HTML dashboard.
-6. **Unified Master Configuration (`config.json`)**:
-   - Every parameter (prompts, models, error rates, matches, rounds, scoring points, participants) is centrally configurable from `config.json`.
+6. **Unified Master Configuration (`config.toml`)**:
+   - Every parameter (prompts, full system prompt templates, models, error rates, matches, rounds, scoring points, participants) is centrally configurable from `config.toml`, complete with comments and documentation.
 
 ---
 
@@ -28,7 +28,7 @@ An experiment exploring how a Large Language Model (**OpenRouter**, **Google Gem
 
 ```
 llm-strategy-learner/
-├── config.json                 # Master configuration file (Pydantic-validated)
+├── config.toml                 # Master configuration file (TOML with comments & system prompts)
 ├── main.py                     # Main CLI entry point
 ├── requirements.txt            # Project dependencies
 ├── README.md                   # V2 Documentation
@@ -120,58 +120,43 @@ python main.py --eval-only
 
 ---
 
-## 🛠️ Configuration (`config.json`)
+## 🛠️ Configuration (`config.toml`)
 
-All runtime options can be customized in `config.json`:
+All runtime options, strategy pools, and full system prompts are customizable in `config.toml`:
 
-```json
-{
-  "experiment": {
-    "name": "v2_championship_tournament",
-    "seed": 42,
-    "output_dir": "output"
-  },
-  "llm": {
-    "provider": "openrouter",
-    "model_name": "stealth/ox-alpha",
-    "temperature": 0.2
-  },
-  "environment": {
-    "error_rate": 0.0
-  },
-  "prompts": {
-    "prompt_mode": "explicit_strategies"
-  },
-  "training": {
-    "enabled": true,
-    "matches_per_strategy": 5,
-    "rounds_per_match": 5,
-    "strategies": [
-      "AlwaysCooperate",
-      "AlwaysDefect",
-      "TitForTat",
-      "SuspiciousTitForTat",
-      "TitForTwoTats",
-      "TatForTit",
-      "Random",
-      "Detective"
-    ],
-    "dreamer": {
-      "enabled": true,
-      "temperature": 0.2
-    }
-  },
-  "evaluation": {
-    "enabled": true,
-    "matches_per_pairing": 5,
-    "rounds_per_match": 5,
-    "scoring": {
-      "win_match_points": 1.0,
-      "draw_match_points": 0.5,
-      "loss_match_points": 0.0
-    }
-  }
-}
+```toml
+[experiment]
+name = "v2_championship_tournament"
+output_dir = "output"
+
+[llm]
+provider = "openrouter"
+model_name = "stealth/ox-alpha"
+temperature = 0.2
+
+[environment]
+error_rate = 0.0 # Deterministic (zero noise)
+
+[prompts]
+# Mode 1: explicit_strategies | Mode 2: generic_archetypes | Mode 3: blind_optimization
+prompt_mode = "explicit_strategies"
+
+[prompts.system_prompts]
+# Fully customizable system prompts with multi-line text directly in TOML
+explicit_strategies = """You are an expert game theory agent playing the Iterated Prisoner's Dilemma..."""
+
+[training]
+matches_per_strategy = 5
+rounds_per_match = 5
+strategies = [
+    "AlwaysCooperate", "AlwaysDefect", "TitForTat",
+    "SuspiciousTitForTat", "TitForTwoTats", "TatForTit",
+    "Random", "Detective"
+]
+
+[evaluation]
+matches_per_pairing = 5
+rounds_per_match = 5
 ```
 
 ---
