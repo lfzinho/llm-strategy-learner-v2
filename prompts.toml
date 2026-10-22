@@ -1,0 +1,184 @@
+# ==============================================================================
+# PROMPTS  -  the single place to read and edit everything the model is told.
+# ==============================================================================
+# Preview the exact text a tier produces without calling any LLM:
+#     python main.py --show-prompt t1_informed --opponent TitForTat
+#
+# STRUCTURE
+#   [blocks.*]  reusable paragraphs. Edit one block and every tier using it changes.
+#   [tiers.*]   a tier is an ordered list of block names (+ whether it names the opponent).
+#   [turn]      the per-round prompt wrapper (history, scores, memory, task).
+#   [reflection] / [dreamer]  the post-match and consolidation prompts.
+#
+# PLACEHOLDERS  {like_this}  are filled in by the code. An unknown placeholder
+# makes the run fail at start-up, so typos are caught before spending tokens.
+#   Blocks:     {strategy_catalog} {opponent_name} {opponent_description}
+#               {opponent_counter} {total_rounds} {round} {rounds_left} {avg_rounds}
+#   Turn:       {system} {round} {my_score} {opp_score} {history} {memory} {playbook} {short_notes}
+#   Reflection: {opponent_info} {total_rounds} {my_score} {opp_score} {score_per_round}
+#               {history_text} {short_notes_text} {memory_text}
+#   Dreamer:    {training_summary} {raw_notes_text}
+#
+# The game is written with neutral labels (Alpha / Beta). Alpha = cooperate, Beta = defect.
+# Keep it that way: "Prisoner's Dilemma" and "Nash equilibrium" push small models
+# straight into always-defect.
+
+[blocks]
+
+rules = """GAME RULES
+You are playing a repeated game against one other player. Every round, you and the other player each secretly choose Alpha or Beta, and then both choices are revealed. Points are awarded like this:
+  * You Alpha, other player Alpha: you get 3, they get 3
+  * You Alpha, other player Beta:  you get 0, they get 5
+  * You Beta,  other player Alpha: you get 5, they get 0
+  * You Beta,  other player Beta:  you get 1, they get 1
+Choices always happen exactly as you decide them (there are no accidents or noise)."""
+
+goal = """YOUR GOAL
+Collect as many points as possible for yourself across all your matches. There is no winner or loser in a match, and the other player's points do not matter to you, only yours do. You will play a series of matches against different players, and your total across all of them is what counts."""
+
+mechanics = """HOW THE POINTS ADD UP
+The same two players keep meeting round after round, so what you do now can change what the other player does later.
+  * Both choosing Alpha every round earns 3 points per round each.
+  * Both choosing Beta every round earns only 1 point per round each.
+  * Choosing Beta against an Alpha earns 5 once, but the other player may start choosing Beta too.
+  * Choosing Alpha against a Beta earns 0.
+Your points come from the long run of rounds, not from a single round."""
+
+tips = """HOW TO THINK ABOUT IT
+  1. Work out which of your two choices scores more against what the other player is doing now, and what it does after each of your choices.
+  2. The other player follows some rule. It may depend on what you did earlier, so look for a pattern between your past choices and its next choice.
+  3. If you are not sure about its rule, test it: change your own choice once and watch how it responds.
+  4. Think long term. A choice that gains points now but makes the other player worse for you later can cost more than it earns."""
+
+horizon_known = """MATCH LENGTH
+This match lasts exactly {total_rounds} rounds. It is round {round} now, so {rounds_left} rounds remain including this one."""
+
+horizon_endgame = """END OF THE MATCH
+Explore early and use what you learn later. In the very last round the other player cannot react to your choice anymore, so you can choose whatever scores most right then."""
+
+horizon_approx = """MATCH LENGTH
+A match lasts around {avg_rounds} rounds. You are not told the exact number in advance, so plan for a short match."""
+
+horizon_unknown = """MATCH LENGTH
+You do not know how long this match will last. It may end soon or go on for a long time, and every round could be the last."""
+
+pool_catalog = """WHO YOU MIGHT FACE
+The other player is using one of these fixed strategies:
+{strategy_catalog}"""
+
+task_identify_pool = """YOUR TASK
+Figure out which of these strategies the other player is using by comparing its choices with your own earlier choices. Then use the reply that earns you the most. Treat the list as a set of hypotheses to check against what you observe, not as certainty."""
+
+task_identify_free = """YOUR TASK
+The other player follows a fixed rule. Infer it from its choices and from how they relate to yours, then choose the replies that earn you the most points over the whole match."""
+
+opponent_named = """YOUR OPPONENT
+The other player is using the strategy "{opponent_name}": {opponent_description}"""
+
+opponent_counter = """HOW TO PLAY AGAINST IT
+{opponent_counter}"""
+
+# ------------------------------------------------------------------------------
+# TIERS  (information ladder: each tier tells the model less than the one before)
+# ------------------------------------------------------------------------------
+# reveals_opponent = true  -> the opponent's name is also given in reflection and memory
+#                             retrieval, and the scorecard skips "identification accuracy".
+
+[tiers.t1_informed]
+description = "Opponent named, described, with the counter-strategy, exact match length and an end-game hint."
+reveals_opponent = true
+blocks = ["rules", "goal", "mechanics", "tips", "horizon_known", "horizon_endgame", "opponent_named", "opponent_counter"]
+
+[tiers.t2_named]
+description = "Opponent named and described, no counter-strategy, exact match length."
+reveals_opponent = true
+blocks = ["rules", "goal", "mechanics", "tips", "horizon_known", "opponent_named"]
+
+[tiers.t3_pool_hint]
+description = "Opponent hidden, but the full list of possible strategies is shown. Match length approximate."
+reveals_opponent = false
+blocks = ["rules", "goal", "mechanics", "tips", "horizon_approx", "pool_catalog", "task_identify_pool"]
+
+[tiers.t4_blind]
+description = "Opponent hidden and no list of strategies. Match length approximate."
+reveals_opponent = false
+blocks = ["rules", "goal", "mechanics", "tips", "horizon_approx", "task_identify_free"]
+
+[tiers.t5_open_ended]
+description = "Opponent hidden, no list, and the match length is unknown (random, can be long)."
+reveals_opponent = false
+blocks = ["rules", "goal", "mechanics", "tips", "horizon_unknown", "task_identify_free"]
+
+# ------------------------------------------------------------------------------
+# PER-ROUND PROMPT
+# ------------------------------------------------------------------------------
+[turn]
+template = """{system}
+
+CURRENT STATE
+- Round: {round}
+- Your points this match: {my_score}
+- Other player's points this match: {opp_score}
+
+WHAT HAS HAPPENED SO FAR THIS MATCH
+{history}
+{playbook}
+WHAT YOU REMEMBER FROM EARLIER MATCHES
+{memory}
+
+NOTES YOU MADE EARLIER IN THIS MATCH
+{short_notes}
+
+YOUR TURN
+1. State your current hypothesis about the other player's rule.
+2. Choose Alpha or Beta for this round.
+3. Give brief reasoning that compares the points you expect from each choice, now and in later rounds.
+4. Optionally add one short note about the other player to keep for the rest of this match."""
+
+# ------------------------------------------------------------------------------
+# POST-MATCH REFLECTION  (turns experience into a reusable memory)
+# ------------------------------------------------------------------------------
+[reflection]
+template = """You just finished a match of {total_rounds} rounds. {opponent_info}
+Final points: you = {my_score} ({score_per_round} per round), other player = {opp_score}.
+For reference: both choosing Alpha every round would give 3.0 points per round, both choosing Beta every round 1.0, and the most you can get from one round is 5.
+
+WHAT HAPPENED, ROUND BY ROUND
+{history_text}
+
+NOTES YOU MADE DURING THE MATCH
+{short_notes_text}
+
+WHAT YOU ALREADY REMEMBER
+{memory_text}
+
+REFLECT
+1. What rule does the other player seem to follow, and what in the history shows it? Quote rounds.
+2. Compare your points per round with the reference values above. Could a different sequence of choices have scored more against this rule? Say which one and why.
+3. Write one short, general lesson that would help in a future match against a player like this. Do not repeat a lesson you already remember; if a past lesson turned out wrong, say so and write the corrected one. Leave it empty if you have nothing new.
+4. Rate how useful that lesson is, from 1 (minor) to 10 (changes how you play)."""
+
+# ------------------------------------------------------------------------------
+# DREAMER  (consolidates memory into a playbook, like the "planning" step in
+# Park et al. 2023, grounded in measured results instead of the model's opinion)
+# ------------------------------------------------------------------------------
+[dreamer]
+template = """You are helping a player prepare for a tournament of repeated Alpha/Beta matches (rules: Alpha/Alpha = 3 each, Alpha/Beta = 0 for you and 5 for them, Beta/Beta = 1 each).
+The player just completed a training phase against a set of opponents. Below are the MEASURED results, then the lessons the player wrote itself.
+
+MEASURED RESULTS FROM TRAINING (the numbers are facts; the lessons below are only opinions)
+{training_summary}
+
+LESSONS THE PLAYER WROTE
+{raw_notes_text}
+
+TASK
+Write a PLAYBOOK in Markdown that the player will read before every round of the tournament.
+1. RECOGNITION: for each kind of opponent seen, the signature in the first rounds that identifies it (what it plays after your Alpha, and after your Beta).
+2. PLAN: for each kind of opponent, the sequence of choices that scored best in the measured results, and why it works in terms of the opponent's rule.
+3. SAFEGUARDS: what to do when the opponent does not match any known kind, and how to avoid getting stuck in mutual Beta.
+
+RULES FOR THE PLAYBOOK
+- Every plan must be consistent with the measured points per round. If a lesson claims something that the measured results contradict (for example, "always Beta" against a player that scored higher when you played Alpha), drop that lesson and say what the numbers support.
+- Do not invent opponent types or results that are not in the data.
+- Keep it short and concrete."""

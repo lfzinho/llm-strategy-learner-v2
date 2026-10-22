@@ -1,15 +1,8 @@
-numpy
-matplotlib
+axelrod
 instructor
 pydantic
 google-genai
 openai
-tqdm
-networkx
-pandas
 python-dotenv
 rich
 pytest
-tabulate
-
-axelrod

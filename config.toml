@@ -1,185 +1,54 @@
 # ==============================================================================
-# LLM Strategy Learner V2 - Experiment Configuration
+# LLM Strategy Learner V2 - experiment configuration
 # ==============================================================================
-# Keep this file focused on choices that define an experiment. Fixed mechanics,
-# scoring, reporting formats, and API limits use code defaults.
+# What the model is told lives in prompts.toml. This file only defines the experiment.
+# Unknown keys are errors, so a typo is caught at start-up.
 
 [experiment]
 output_dir = "output"
+# Seeds match lengths and the Random opponent, so runs (and tiers) face the same matches.
+# The LLM itself is not deterministic, even at low temperature.
+seed = 42
 
 [llm]
-# Provider and model are configured via .env:
-#   LLM_PROVIDER=openrouter | gemini | ollama
+# Provider and model come from .env:
+#   LLM_PROVIDER=openrouter | gemini | ollama | mock     (mock = offline, no API calls)
 #   OPENROUTER_MODEL=...  GEMINI_MODEL=...  OLLAMA_MODEL=...
-
-# Sampling temperature (0.0 - 1.0).
 temperature = 0.2
+# Attempts per call (parse errors, timeouts) before the fallback move is used.
+max_retries = 3
+# Stop the run (progress is checkpointed) after this many fallback moves in a row.
+max_consecutive_fallbacks = 5
 
-# ==============================================================================
-# PROMPT CONFIGURATION & SYSTEM PROMPTS
-# ==============================================================================
+[llm.rate_limit]
+max_rpm = 30
+max_rpd = 1000
+
+[environment]
+# Probability that a chosen move is flipped. Keep 0.0 for the baseline experiment.
+error_rate = 0.0
+
 [prompts]
-# Active prompt mode for the agent.
-# Available options:
-# 1. "explicit_strategies" -> (Mode 1 - Easiest): Agent is told the exact candidate
-#                             strategies in the pool and instructed to identify and counter them.
-# 2. "generic_archetypes"  -> (Mode 2 - Intermediate): Agent is told classical heuristic
-#                             strategies exist, but not their specific class names.
-# 3. "blind_optimization"  -> (Mode 3 - Hard / Tabula Rasa): Only pure IPD rules and payoff matrix;
-#                             no hints about classical strategies.
-# 4. "revealed_strategy"    -> The exact opponent strategy identity is provided to the agent.
-prompt_mode = "explicit_strategies"
-
-# ------------------------------------------------------------------------------
-# FULL SYSTEM PROMPTS
-# You can review, edit, or customize the exact wording below directly.
-# ------------------------------------------------------------------------------
-[prompts.system_prompts]
-
-# Mode 1: Known Pool System Prompt
-explicit_strategies = """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
-
-ENVIRONMENT & RULES:
-- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
-- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
-- Payoff Matrix:
-  * Both Cooperate: 3 points each
-  * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
-  * You Cooperate, Opponent Defects: You get 0 points, Opponent gets 5
-  * Both Defect: 1 point each
-
-STRATEGY IDENTIFICATION TASK (KNOWN POOL):
-You are competing against an opponent using one of the following classical strategies:
-{known_strategies_descriptions}
-
-YOUR PRIMARY OBJECTIVE:
-1. Infer the opponent's decision rule from the observed move history. The strategy descriptions are clues for diagnosis, not answers for your counter-policy.
-2. Choose the move that maximizes YOUR TOTAL CUMULATIVE SCORE over the remaining rounds. Score differential is secondary and must never replace your own score as the objective.
-3. Independently derive the policy from the payoff matrix and the opponent's observed transition rule. Compare candidate continuations: mutual cooperation pays 3 each round, mutual defection pays 1 each round, exploiting cooperation pays 5 for one round but may trigger retaliation, and cooperating against defection pays 0.
-4. Balance immediate payoff against future consequences in this repeated, finite-horizon game. Do not call mutual defection optimal merely because it is a one-shot Nash equilibrium.
-5. Explain the policy you derive from behavioral evidence and payoffs. Do not use a memorized strategy-to-response table.
-"""
-
-# Mode 2: Classical Heuristics System Prompt
-generic_archetypes = """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
-
-ENVIRONMENT & RULES:
-- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
-- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
-- Payoff Matrix:
-  * Both Cooperate: 3 points each
-  * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
-  * You Cooperate, Opponent Defects: You get 0 points, Opponent gets 5
-  * Both Defect: 1 point each
-
-STRATEGY IDENTIFICATION TASK (CLASSICAL HEURISTICS):
-You are competing against opponents who follow fixed classical game-theoretic strategies. 
-Opponents may be purely cooperative, purely exploitative, strictly reciprocal, forgiving, probing/testing, or randomized.
-
-YOUR PRIMARY OBJECTIVE:
-1. Rapidly formulate a hypothesis about what decision rule or heuristic your opponent follows.
-2. Test their reaction to your moves in the opening rounds without assuming that defection is inherently safer.
-3. Optimize YOUR TOTAL CUMULATIVE SCORE dynamically. Compare the immediate payoff and expected future payoff of cooperation and defection using the observed transition rule.
-4. Treat mutual defection as one possible outcome, not as a universal objective or proof of optimality.
-5. Explain the policy you independently derive from the observed behavior and payoff matrix.
-"""
-
-# Mode 3: Tabula Rasa System Prompt
-blind_optimization = """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
-
-ENVIRONMENT & RULES:
-- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
-- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
-- Payoff Matrix:
-  * Both Cooperate: 3 points each
-  * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
-  * You Cooperate, Opponent Defects: You get 0 points, Opponent gets 5
-  * Both Defect: 1 point each
-
-STRATEGY OPTIMIZATION TASK:
-Your goal is to maximize YOUR TOTAL CUMULATIVE SCORE in the Iterated Prisoner's Dilemma. Do not optimize score differential as a substitute objective.
-Observe the opponent's actions across rounds, infer the rule mapping history to future moves, and independently derive the best response from the payoff matrix. Compare cooperation and defection over the remaining horizon; do not assume that the one-shot Nash equilibrium remains the best iterated policy.
-"""
-
-revealed_strategy = """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
-
-ENVIRONMENT & RULES:
-- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
-- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
-- Your opponent is playing this strategy: {opponent_strategy}
-
-STRATEGY RESPONSE TASK:
-Use the revealed strategy identity only as a hypothesis about behavior. Verify it against observed moves, then independently derive the mathematically optimal counter-strategy from the payoff matrix and remaining horizon. Maximize YOUR TOTAL CUMULATIVE SCORE; score differential is secondary.
-"""
-
-# ------------------------------------------------------------------------------
-# REFLECTION & DREAMER PROMPTS
-# ------------------------------------------------------------------------------
-[prompts.reflection]
-prompt_template = """You just finished a Normal(10, 1)-round match of Iterated Prisoner's Dilemma. {revealed_opponent_info}
-Final Score: You = {my_score} pts | Opponent = {opp_score} pts
-
-MATCH MOVE HISTORY:
-{history_text}
-
-OBSERVATIONS RECORDED DURING MATCH:
-{short_notes_text}
-
-EXISTING PERSISTENT STRATEGY NOTES:
-{long_notes_text}
-
-POST-MATCH REFLECTION TASK:
-1. What strategy/archetype did this opponent use? How did they react to your opening and subsequent moves?
-2. Did your play achieve the maximum possible payoff against this specific strategy? If not, what would have been mathematically superior?
-3. Formulate a new, concise long-term heuristic or archetype identification rule to remember for all future games against this type of opponent. (If no new rule is needed, you may leave it empty).
-"""
-
-[prompts.dreamer]
-prompt_template = """You are the Strategy Synthesis Dreamer for an autonomous game-theoretic LLM agent.
-The agent has just completed a comprehensive structured training battery against various classical opponents in the Iterated Prisoner's Dilemma.
-
-TRAINING SUMMARY & RESULTS:
-{training_summary}
-
-RAW NOTES & OBSERVATIONS ACCUMULATED DURING TRAINING:
-{raw_notes_text}
-
-YOUR TASK:
-Consolidate, distill, and synthesize all the raw notes and match experiences into a single, cohesive, high-density MASTER STRATEGY PLAYBOOK.
-This playbook will be frozen into the agent's memory for the upcoming championship tournament.
-
-The Master Strategy Playbook MUST include:
-1. Quick Archetype Recognition Guide:
-   - What to play in Round 1 and Round 2 to probe and reliably diagnose the opponent's strategy.
-   - Decision tree / signature behavioral markers for each archetype (Always Cooperate, Always Defect, Tit For Tat, Suspicious TFT, Tit For Two Tats, Detective, Tat For Tit, Random, etc.).
-2. Optimal Counter-Strategy Policy:
-   - For each recognized archetype, the exact optimal sequence of moves to maximize score.
-   - When to cooperate for mutual 3-3 payoff, and when to defect for 5-0 payoff.
-3. Universal Principles & Defensive Safeguards:
-   - How to avoid costly feuds or sucker payoffs.
-   - End-game moves.
-
-Output the synthesized playbook in clear, dense, actionable Markdown.
-
-CRITICAL REASONING REQUIREMENTS:
-- The objective is the agent's total cumulative score, not score differential.
-- Do not treat mutual defection as universally optimal. It is a one-shot Nash equilibrium, while repeated interaction can make mutual cooperation higher scoring.
-- Do not copy repeated reflections as evidence. Check every claimed policy against the payoff matrix and observed move sequence.
-- Independently derive each policy from behavioral evidence. Do not produce a canned strategy-to-policy table.
-- For every archetype, explain why cooperation or defection is optimal over the remaining horizon, including retaliation, forgiveness, and end-game effects.
-"""
+# Which information tier the model plays under (defined in prompts.toml):
+#   t1_informed    opponent named + counter-strategy + exact match length
+#   t2_named       opponent named and described, no counter-strategy
+#   t3_pool_hint   opponent hidden, list of possible strategies shown
+#   t4_blind       opponent hidden, no list
+#   t5_open_ended  opponent hidden, no list, unknown match length
+tier = "t3_pool_hint"
+prompts_file = "prompts.toml"
+# How many remembered entries (ranked by recency, importance, relevance) go into each prompt.
+memory_top_k = 8
 
 # ==============================================================================
-# PHASE 1: SEQUENTIAL BLOCK TRAINING CONFIGURATION
+# PHASE 1: TRAINING
 # ==============================================================================
 [training]
-# Number of consecutive matches against each strategy archetype.
 matches_per_strategy = 5
-
-# Sampled number of rounds per match: Normal(average, standard deviation)
+# Match length: an integer, { average, std_dev } for a bell curve,
+# or { prob_end = 0.1 } for an unknown horizon (the match may end after any round).
 rounds_per_match = { average = 10.0, std_dev = 1.0 }
-
-# The list of strategy archetypes to train against in sequence
+# Strategies to train against, in order (see src/opponents.py for the available keys).
 strategies = [
     "AlwaysCooperate",
     "AlwaysDefect",
@@ -188,22 +57,21 @@ strategies = [
     "TitForTwoTats",
     "TatForTit",
     "Random",
-    "Detective"
+    "Detective",
 ]
 
+[training.dreamer]
+enabled = true
+temperature = 0.2
+
 # ==============================================================================
-# PHASE 2: ROUND-ROBIN CHAMPIONSHIP TOURNAMENT CONFIGURATION
+# PHASE 2: ROUND-ROBIN TOURNAMENT
 # ==============================================================================
 [evaluation]
-# Number of matches each pairing plays against each other
+enabled = true
 matches_per_pairing = 5
-
-# Sampled number of rounds per match: Normal(average, standard deviation)
 rounds_per_match = { average = 10.0, std_dev = 1.0 }
-
-# Competitor line-up:
-# - "LLMPlayer": The trained agent equipped with the synthesized Master Playbook
-# - Followed by 1 representative instance of each classical strategy
+# "LLMPlayer" is the trained model (frozen: it reads its memory and playbook but learns nothing new).
 participants = [
     "LLMPlayer",
     "AlwaysCooperate",
@@ -213,6 +81,10 @@ participants = [
     "TitForTwoTats",
     "TatForTit",
     "Random",
-    "Detective"
+    "Detective",
 ]
 
+[reporting]
+export_html = true
+export_markdown = true
+export_json = true

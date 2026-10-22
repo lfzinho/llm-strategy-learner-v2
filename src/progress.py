@@ -21,6 +21,7 @@ class ProgressTracker:
         self._started = False
         self.overall_task_id: Optional[int] = None
         self.current_task_id: Optional[int] = None
+        self.status_task_id: Optional[int] = None
 
     def start(self):
         if not self._started:
@@ -59,6 +60,13 @@ class ProgressTracker:
         if total is not None:
             self.progress.update(self.current_task_id, total=total)
         self.progress.update(self.current_task_id, completed=completed)
+
+    def set_status(self, text: str):
+        """Shows a live one-line status (e.g. running cooperation rate) under the bars."""
+        if self.status_task_id is None:
+            self.status_task_id = self.progress.add_task(text, total=None, start=False)
+        else:
+            self.progress.update(self.status_task_id, description=text)
 
     def reset_current(self, description: str, total: int):
         if self.current_task_id is None:

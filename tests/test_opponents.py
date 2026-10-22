@@ -63,3 +63,52 @@ def test_registry_names_resolve():
 def test_display_names_are_stable():
     for key, spec in OPPONENTS.items():
         assert make_opponent(key).name == spec.display_name
+
+
+# --- the counter-strategies written into the T1 prompt must actually work ---------------
+COUNTER_SEQUENCES = {
+    "AlwaysCooperate": lambda n: "D" * n,
+    "AlwaysDefect": lambda n: "D" * n,
+    "TitForTat": lambda n: "C" * n,
+    "SuspiciousTitForTat": lambda n: "C" * n,
+    "TitForTwoTats": lambda n: ("DC" * n)[:n],
+    "TatForTit": lambda n: "D" * n,
+    "Detective": lambda n: "DDD" + "C" * (n - 3),
+    "GrimTrigger": lambda n: "C" * n,
+    "Pavlov": lambda n: "C" * n,
+}
+
+
+@pytest.mark.parametrize("key", list(COUNTER_SEQUENCES))
+def test_counter_strategy_scores_within_10_percent_of_the_optimum(key):
+    from src.scorecard import best_achievable
+
+    n = 10
+    score = play_match(
+        axl.MockPlayer(actions=[axl.Action.C if c == "C" else axl.Action.D for c in COUNTER_SEQUENCES[key](n)]),
+        make_opponent(key), n, seed=0,
+    ).score1
+    assert score >= 0.9 * best_achievable(key, n), f"{key}: counter scores {score}, optimum {best_achievable(key, n)}"
+
+
+def test_random_counter_beta_beats_alpha_on_average():
+    n, total = 10, {"C": 0, "D": 0}
+    for seed in range(60):
+        for move in "CD":
+            total[move] += play_match(axl.MockPlayer(actions=[axl.Action[move]]), make_opponent("Random"), n, seed=seed).score1
+    assert total["D"] > 1.6 * total["C"]
+
+
+def test_every_pool_opponent_has_a_neutral_description_and_counter():
+    for spec in OPPONENTS.values():
+        assert spec.description and spec.counter
+        for word in ("cooperate", "defect", "tit for tat"):
+            assert word not in (spec.description + spec.counter + spec.prompt_name).lower(), (spec.key, word)
+
+
+def test_identify_label_prefers_the_longest_name():
+    from src.opponents import identify_label
+    assert identify_label("looks like a Zen Alpha Mimic to me") == "TitForTwoTats"
+    assert identify_label("probably an alpha mimic") == "TitForTat"
+    assert identify_label("Tit-for-Tat") == "TitForTat"
+    assert identify_label("something unknown") is None

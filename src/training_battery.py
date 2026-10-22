@@ -2,28 +2,23 @@ import json
 import os
 import random
 from typing import Any, Dict, List, Optional, Tuple
-from tqdm import tqdm
 
-try:
-    from src.match_runner import play_match
-    from src.opponents import make_opponent
-    from src.dreamer import Dreamer
-    from src.progress import ProgressTracker
-    from src.config import NormalRoundsConfig, RoundsPerMatchConfig
-except ImportError:
-    from match_runner import play_match
-    from opponents import make_opponent
-    from dreamer import Dreamer
-    from progress import ProgressTracker
-    from config import NormalRoundsConfig, RoundsPerMatchConfig
+from src.config import NormalRoundsConfig, RoundsPerMatchConfig
+from src.dreamer import Dreamer
+from src.match_runner import RoundSampler, play_match
+from src.opponents import make_opponent, resolve_key
+from src.progress import ProgressTracker
+from src.scorecard import build_scorecard, print_scorecard, records_from_training, write_scorecard
+
+CHECKPOINT_VERSION = 2
 
 
 class TrainingBattery:
     """Structured sequential block training battery.
-    
-    Plays N consecutive matches against Strategy 1, then N consecutive matches against Strategy 2,
-    etc., allowing the LLM to learn and hypothesize about each archetype in depth.
-    Finally invokes the Dreamer phase to consolidate all notes into a Master Playbook.
+
+    Plays N consecutive matches against strategy 1, then N against strategy 2, and so on,
+    so the LLM can learn each opponent in depth. Afterwards the Dreamer consolidates the
+    memory into a playbook. The run can be resumed from `training_checkpoint.json`.
     """
 
     def __init__(
@@ -35,76 +30,70 @@ class TrainingBattery:
         error_rate: float = 0.0,
         dreamer_enabled: bool = True,
         dreamer_temperature: float = 0.2,
-        dreamer_custom_template: Optional[str] = None,
+        seed: Optional[int] = None,
     ):
         self.llm_player = llm_player
         self.matches_per_strategy = matches_per_strategy
-        self.rounds_per_match = rounds_per_match
         self.error_rate = error_rate
         self.dreamer_enabled = dreamer_enabled
         self.dreamer_temperature = dreamer_temperature
-        self.dreamer_custom_template = dreamer_custom_template
+        self.random = random.Random(seed)
+        self.sampler = RoundSampler(rounds_per_match, self.random)
 
         self.strategy_names = strategies or [
-            "AlwaysCooperate",
-            "AlwaysDefect",
-            "TitForTat",
-            "SuspiciousTitForTat",
-            "TitForTwoTats",
-            "TatForTit",
-            "Random",
-            "Detective",
+            "AlwaysCooperate", "AlwaysDefect", "TitForTat", "SuspiciousTitForTat",
+            "TitForTwoTats", "TatForTit", "Random", "Detective",
         ]
+        for name in self.strategy_names:
+            resolve_key(name)  # fail before spending any tokens on a typo
+
         self.history_log: List[Dict[str, Any]] = []
         self.progress = ProgressTracker()
-        if hasattr(self.llm_player, "set_console"):
-            self.llm_player.set_console(self.progress.console)
-        self.random = random.Random()
+        self.llm_player.set_console(self.progress.console)
 
-    def _sample_rounds(self) -> int:
-        if isinstance(self.rounds_per_match, NormalRoundsConfig):
-            return max(1, round(self.random.gauss(self.rounds_per_match.average, self.rounds_per_match.std_dev)))
-        return self.rounds_per_match
-
+    # ------------------------------------------------------------ checkpoint
     def _checkpoint_path(self, output_dir: str) -> str:
         return os.path.join(output_dir, "training_checkpoint.json")
 
-    def _save_checkpoint(self, output_dir: str, next_strategy_index: int, next_match_in_block: int, global_match_index: int):
+    def _save_checkpoint(self, output_dir: str, next_strategy_index: int, next_match_in_block: int,
+                         global_match_index: int, matches_done: bool = False):
+        p = self.llm_player
         checkpoint = {
-            "version": 1,
+            "version": CHECKPOINT_VERSION,
             "strategy_names": self.strategy_names,
             "next_strategy_index": next_strategy_index,
             "next_match_in_block": next_match_in_block,
             "global_match_index": global_match_index,
+            "matches_done": matches_done,
             "history_log": self.history_log,
-            "long_lasting_notes": list(self.llm_player.long_lasting_notes),
-            "short_lasting_notes": list(self.llm_player.short_lasting_notes),
-            "master_playbook": self.llm_player.master_playbook,
-            "freeze_notes": self.llm_player.freeze_notes,
-            "last_opponent_name": self.llm_player.last_opponent_name,
+            "memory": p.memory.to_list(),
+            "memory_step": p.memory.step,
+            "master_playbook": p.master_playbook,
+            "freeze_notes": p.freeze_notes,
+            "stats": dict(p.stats),
         }
         with open(self._checkpoint_path(output_dir), "w", encoding="utf-8") as f:
             json.dump(checkpoint, f, indent=2)
 
-    def _load_checkpoint(self, output_dir: str):
+    def _load_checkpoint(self, output_dir: str) -> Optional[Dict[str, Any]]:
         path = self._checkpoint_path(output_dir)
         if not os.path.exists(path):
             return None
-
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if not isinstance(data, dict):
-                return None
-            self.strategy_names = data.get("strategy_names", self.strategy_names)
-            self.history_log = data.get("history_log", [])
-            self.llm_player.long_lasting_notes = data.get("long_lasting_notes", self.llm_player.long_lasting_notes)
-            self.llm_player.short_lasting_notes = data.get("short_lasting_notes", self.llm_player.short_lasting_notes)
-            self.llm_player.master_playbook = data.get("master_playbook", self.llm_player.master_playbook)
-            self.llm_player.freeze_notes = data.get("freeze_notes", self.llm_player.freeze_notes)
-            self.llm_player.last_opponent_name = data.get("last_opponent_name", self.llm_player.last_opponent_name)
+            if data.get("version") != CHECKPOINT_VERSION:
+                raise ValueError(f"checkpoint version {data.get('version')} is not {CHECKPOINT_VERSION}")
+            p = self.llm_player
+            self.strategy_names = data["strategy_names"]
+            self.history_log = data["history_log"]
+            p.memory.load_list(data["memory"], data.get("memory_step", 0))
+            p.master_playbook = data.get("master_playbook")
+            p.freeze_notes = data.get("freeze_notes", False)
+            p.stats.update(data.get("stats", {}))
             return data
-        except Exception:
+        except Exception as e:
+            print(f"WARNING: could not use checkpoint {path} ({e}). Starting training from scratch.")
             return None
 
     def _clear_checkpoint(self, output_dir: str):
@@ -112,114 +101,128 @@ class TrainingBattery:
         if os.path.exists(path):
             os.remove(path)
 
+    # ------------------------------------------------------------------- run
     def run_training(self, output_dir: str = "output") -> Tuple[List[Dict[str, Any]], Optional[str]]:
         os.makedirs(output_dir, exist_ok=True)
+        player = self.llm_player
+        player.phase = "training"
         total_matches = len(self.strategy_names) * self.matches_per_strategy
+        history_path = os.path.join(output_dir, "training_history.json")
 
         checkpoint = self._load_checkpoint(output_dir)
-        resume_strategy_index = 1
-        resume_match_index = 0
-        match_global_index = 0
-
+        resume_strategy_index, resume_match_index, match_global_index = 1, 0, 0
+        matches_done = False
         if checkpoint:
-            resume_strategy_index = int(checkpoint.get("next_strategy_index", 1))
-            resume_match_index = int(checkpoint.get("next_match_in_block", 0))
-            match_global_index = int(checkpoint.get("global_match_index", 0))
-            self.history_log = checkpoint.get("history_log", self.history_log)
-            print(f"\nResuming training from saved checkpoint at strategy {resume_strategy_index}, match offset {resume_match_index}.")
+            resume_strategy_index = int(checkpoint["next_strategy_index"])
+            resume_match_index = int(checkpoint["next_match_in_block"])
+            match_global_index = int(checkpoint["global_match_index"])
+            matches_done = bool(checkpoint.get("matches_done"))
+            player.match_number = match_global_index
+            print(f"\nResuming training from checkpoint (match {match_global_index}/{total_matches}"
+                  f"{', Dreamer pending' if matches_done else ''}).")
         else:
             self.history_log = []
 
         print("\n" + "=" * 60)
-        print(f"🎯 PHASE 1: SEQUENTIAL BLOCK TRAINING ({len(self.strategy_names)} strategies, {self.matches_per_strategy} matches each)")
+        print(f"PHASE 1: SEQUENTIAL BLOCK TRAINING ({len(self.strategy_names)} strategies, "
+              f"{self.matches_per_strategy} matches each, tier {player.tier})")
         print("=" * 60)
 
-        self.progress.start()
-        self.progress.add_overall_task("Training progress", total=total_matches)
-        self.progress.update_overall(match_global_index)
-
-        for s_idx, strat_name in enumerate(self.strategy_names, 1):
-            if resume_strategy_index > s_idx:
-                continue
-
+        if not matches_done:
+            self.progress.start()
+            self.progress.add_overall_task("Training progress", total=total_matches)
+            self.progress.update_overall(match_global_index)
+            self.progress.set_status("starting...")
             try:
-                from rich.console import Console
-                from rich.rule import Rule
-                console = self.progress.console
-                console.print(Rule(f"[bold yellow]Strategy Block {s_idx}/{len(self.strategy_names)}: {strat_name} ({self.matches_per_strategy} matches)[/bold yellow]"))
-            except Exception:
-                print(f"\n--- Strategy Block {s_idx}/{len(self.strategy_names)}: {strat_name} ---")
+                for s_idx, strat_name in enumerate(self.strategy_names, 1):
+                    if resume_strategy_index > s_idx:
+                        continue
+                    self.progress.console.rule(
+                        f"[bold yellow]Strategy block {s_idx}/{len(self.strategy_names)}: "
+                        f"{strat_name} ({self.matches_per_strategy} matches)[/bold yellow]")
+                    start_match = resume_match_index if resume_strategy_index == s_idx else 0
+                    resume_strategy_index = 1
 
-            start_match = 0
-            if resume_strategy_index == s_idx:
-                start_match = resume_match_index
-            resume_strategy_index = 1
+                    for m_idx in range(start_match, self.matches_per_strategy):
+                        match_global_index += 1
+                        self._play_one(strat_name, s_idx, m_idx, match_global_index)
+                        self.progress.update_overall(match_global_index)
+                        self._update_status()
 
-            for m_idx in range(start_match, self.matches_per_strategy):
-                match_global_index += 1
-                opponent = make_opponent(strat_name)
-                self.llm_player.last_opponent_name = opponent.name
-                rounds_this_match = self._sample_rounds()
-
-                self.progress.reset_current(f"Current match vs {opponent.name}", rounds_this_match)
-
-                self.llm_player.turn_callback = lambda r: self.progress.update_current(r - 1)
-                result = play_match(
-                    self.llm_player, opponent, rounds_this_match,
-                    seed=self.random.randrange(2**31), noise=self.error_rate,
-                )
-                self.llm_player.turn_callback = None
-                self.progress.update_current(rounds_this_match)
-                self.progress.update_overall(match_global_index)
-                llm_score = result.score1
-                opp_score = result.score2
-
-                # Snapshot notes before reflection
-                notes_before = set(self.llm_player.long_lasting_notes)
-
-                # Finish match (triggers LLM reflection and updates notes)
-                self.llm_player.finish_match(opponent)
-
-                # Detect newly added notes
-                new_notes = [n for n in self.llm_player.long_lasting_notes if n not in notes_before]
-
-                log_entry = {
-                    "global_match": match_global_index,
-                    "strategy_block": strat_name,
-                    "match_in_block": m_idx + 1,
-                    "opponent_strategy": opponent.name,
-                    "llm_score": llm_score,
-                    "opponent_score": opp_score,
-                    "rounds_played": rounds_this_match,
-                    "moves": ["".join(m) for m in result.moves],
-                    "winner": "LLM" if llm_score > opp_score else ("Opponent" if opp_score > llm_score else "Draw"),
-                    "new_notes": new_notes,
-                    "all_long_notes": list(self.llm_player.long_lasting_notes),
-                }
-                self.history_log.append(log_entry)
-
-                next_strategy_index = s_idx
-                next_match_in_block = m_idx + 1
-                if next_match_in_block >= self.matches_per_strategy:
-                    next_strategy_index = s_idx + 1
-                    next_match_in_block = 0
-                self._save_checkpoint(output_dir, next_strategy_index, next_match_in_block, match_global_index)
-
-            history_path = os.path.join(output_dir, "training_history.json")
+                        next_s, next_m = s_idx, m_idx + 1
+                        if next_m >= self.matches_per_strategy:
+                            next_s, next_m = s_idx + 1, 0
+                        self._save_checkpoint(output_dir, next_s, next_m, match_global_index)
+            finally:
+                self.progress.stop()
+                # Whatever happened (including an abort), keep what was learned so far.
+                with open(history_path, "w", encoding="utf-8") as f:
+                    json.dump(self.history_log, f, indent=2)
+            self._save_checkpoint(output_dir, len(self.strategy_names) + 1, 0, match_global_index, matches_done=True)
+            print(f"\nAll strategy blocks completed. Training history saved to {history_path}")
+        else:
             with open(history_path, "w", encoding="utf-8") as f:
                 json.dump(self.history_log, f, indent=2)
 
-        self.progress.stop()
-        self._clear_checkpoint(output_dir)
-        print(f"\nAll strategy blocks completed! Training history saved to {history_path}")
+        self._write_scorecard(output_dir)
 
         master_playbook = None
         if self.dreamer_enabled:
-            dreamer = Dreamer(
-                self.llm_player,
-                temperature=self.dreamer_temperature,
-                custom_template=self.dreamer_custom_template,
-            )
-            master_playbook = dreamer.synthesize_master_playbook(self.history_log, output_dir=output_dir)
-
+            master_playbook = Dreamer(player, temperature=self.dreamer_temperature).synthesize_master_playbook(
+                self.history_log, output_dir=output_dir)
+        player.save_memory(os.path.join(output_dir, "memory.json"))
+        self._clear_checkpoint(output_dir)  # only after the playbook and memory are safely written
         return self.history_log, master_playbook
+
+    def _play_one(self, strat_name: str, s_idx: int, m_idx: int, match_global_index: int):
+        player = self.llm_player
+        opponent = make_opponent(strat_name)
+        rounds = self.sampler.sample()
+        player.begin_match(opponent.name, rounds, self.sampler.average)
+        player.match_number = match_global_index
+        self.progress.reset_current(f"Current match vs {opponent.name}", rounds)
+
+        stats_before = player.stats_snapshot()
+        lessons_before = set(player.lessons)
+        player.turn_callback = lambda r: self.progress.update_current(r - 1)
+        try:
+            result = play_match(player, opponent, rounds, seed=self.random.randrange(2**31), noise=self.error_rate)
+        finally:
+            player.turn_callback = None
+        self.progress.update_current(rounds)
+
+        turns = list(player.turn_log)
+        player.finish_match(opponent)
+        self.history_log.append({
+            "global_match": match_global_index,
+            "strategy_block": strat_name,
+            "match_in_block": m_idx + 1,
+            "opponent_strategy": opponent.name,
+            "llm_score": result.score1,
+            "opponent_score": result.score2,
+            "rounds_played": rounds,
+            "moves": ["".join(m) for m in result.moves],
+            "turns": turns,
+            "winner": "LLM" if result.score1 > result.score2 else ("Opponent" if result.score2 > result.score1 else "Draw"),
+            "new_notes": [n for n in player.lessons if n not in lessons_before],
+            "llm_stats": player.stats_since(stats_before),
+        })
+
+    def _update_status(self):
+        records = records_from_training(self.history_log)
+        if not records:
+            return
+        card = build_scorecard(records, dict(self.llm_player.stats))
+        o = card["overall"]
+        stats = self.llm_player.stats
+        self.progress.set_status(
+            f"Running: {o['points_per_round']} pts/round ({o['efficiency']:.0%} of best) | "
+            f"Alpha {o['alpha_rate']:.0%} | fallbacks {stats.get('fallbacks', 0)} | parse errors {stats.get('parse_failures', 0)}")
+
+    def _write_scorecard(self, output_dir: str):
+        player = self.llm_player
+        card = build_scorecard(
+            records_from_training(self.history_log), dict(player.stats), tier=player.tier,
+            phase="training", reveals_opponent=player.reveals_opponent)
+        write_scorecard(card, output_dir, "scorecard_training")
+        print_scorecard(card, self.progress.console)
