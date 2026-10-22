@@ -220,7 +220,20 @@ pytest          # 102 tests, about 20 seconds, no network
 
   What this shows: the scorecard tells the tiers apart. Only `t1` (which is handed the counters) changed behaviour at all, and only partly: it exploited Always Alpha at 78-87% efficiency but ignored "play Beta every round" against Tat For Tit and stayed at 10%. Only `t3` produced any correct identification (39-56% in training). In `t2`-`t5` this 3B model plays Alpha every round regardless, the opposite failure from the old run's Beta collapse, and the scorecard flags it (60% efficiency against Always Alpha, 10% against Tat For Tit). With 3 matches per opponent and one seed, differences of a few points are not significant; the pattern (only `t1` moves, only `t3` identifies) is the finding.
 
-**Not yet validated**: whether the new prompts beat the old ones on a capable model, and the comparison between tiers at a meaningful sample size. Both need runs with more matches (`matches_per_strategy = 5` or more) on a stronger model; `--tiers all` and the scorecard are built for exactly that. LLM output is not deterministic even at low temperature, so repeat runs before drawing conclusions.
+* **A larger local model**: `dolphin-llama3` (8B), same setup and seed, three tiers, 0 fallbacks: `t1_informed` 88% tournament efficiency (Alpha 56%), `t3_pool_hint` 50% (Alpha 96%, identification 33%), `t4_blind` 49% (Alpha 100%, identification 0%). Same pattern as the 3B: only the tier that hands over the counters changes behaviour.
+* **A capable model (OpenRouter, `anthropic/claude-haiku-5.5`)**: all five tiers, full 8-opponent pool, 3 matches per strategy and per pairing, seed 42, about 10 rounds per match (`t5`: geometric end, mean 10). 0 fallbacks, at most 1 parse failure per tier. Actual cost for the whole run: about **$3.34**.
+
+  | Tier | Training efficiency | Tournament efficiency | Tournament points/round | Identification (tournament) |
+  |---|---|---|---|---|
+  | `t1_informed` | 99% | 99% | 3.42 | n/a |
+  | `t2_named` | 98% | 100% | 3.43 | n/a |
+  | `t3_pool_hint` | 86% | 90% | 3.10 | 41% |
+  | `t4_blind` | 85% | 84% | 2.91 | 7% |
+  | `t5_open_ended` | 79% | 76% | 2.64 | 8% |
+
+  What this shows: efficiency falls monotonically as information is removed, which is what the ladder is designed to measure. Told who the opponent is, the model plays essentially optimally (it even exploits Always Alpha and Tat For Tit at 5.0/round). Without the name, the weakest spot is Tit For Two Tats (61% in `t4`, 76% in `t3`). With an unknown horizon (`t5`) it also gets noticeably more cautious against Always Alpha (60%). Identification from play alone is poor even for this model (7-8% when no catalog is shown), so blind-tier results come from generally sensible play, not from recognising the opponent. No Beta/Beta collapse appeared in any tier.
+
+**Caveats**: 3 matches per opponent, one seed and one model, so gaps of a few points between neighbouring tiers (for example `t1` vs `t2`, or training vs tournament) are noise. LLM output is not deterministic even at low temperature, so repeat runs (`matches_per_strategy = 5` or more, other seeds and models) before drawing firmer conclusions. There is no run of the old prompts on the same model, so "better than before" is shown only through the removed failure (the old Beta/Beta collapse, now flagged by the scorecard and absent here), not through a head-to-head.
 
 ---
 
