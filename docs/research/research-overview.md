@@ -17,8 +17,8 @@ We study this in three steps, each adding one source of social complexity to the
 | Step | Setting | What is new | Status |
 |---|---|---|---|
 | 1 | One LLM agent against fixed, classical strategies | A measurable baseline; how information and memory affect play | **Done (this document)** |
-| 2 | Several LLM agents playing each other, with messages before each round | Communication ("cheap talk"), possible deception | TBD |
-| 3 | A population of agents with a public record of who betrayed whom | Reputation and third-party observation | TBD |
+| 2 | Several LLM agents playing each other, with messages before each round | Communication ("cheap talk"), possible deception | Implemented in `ipd-society`; experiments pending |
+| 3 | A population of agents with a public record of who betrayed whom | Reputation and third-party observation | Implemented in `ipd-society`; experiments pending |
 
 The ordering is deliberate. Step 1 gives a controlled setting where the optimal play is known, so any weakness of the LLM can be measured exactly. Steps 2 and 3 remove that ground truth in exchange for realism, so we want to arrive there with a trusted measurement toolkit and a known baseline of how a single agent behaves.
 
@@ -143,11 +143,32 @@ A suite of 102 offline tests (using a deterministic `mock` provider and a stubbe
 
 ## 3. Step 2: LLM agents playing each other, with communication
 
-**TBD.**
+**Implemented in the sibling project `../ipd-society`; no real-model experiments yet.**
+
+The single agent is replaced by a small society (LLM agents plus Axelrod strategies, some of which can be chatty or
+deceptive). Every pair plays a match each episode. Before each round (or only before a match, or never) partners swap
+short messages. Messages are non-binding cheap talk, and each carries a structured *promise* (Alpha, Beta or none), so
+honesty can be measured exactly: a promise is broken when the executed move differs. Both agents write at the same
+time and then read; extra exchanges allow replies. Questions: does talk raise cooperation, do LLM agents lie, do they
+believe a known liar, and does belief respond to experience (trust ratings and expectation accuracy are logged).
 
 ## 4. Step 3: a population with reputation
 
-**TBD.**
+**Implemented in `../ipd-society`; no real-model experiments yet.**
+
+A public ledger records who played what against whom. Agents can be shown a scoreboard (cooperation rate and betrayal
+count per agent) or the full ledger (a partner's recent matches round by round, with betrayals marked), and optionally
+read a public board of self-reported statements (gossip, unverifiable). Comparing verifiable and unverifiable
+information tests whether agents tell them apart. Reputation-sensitive behaviour is measured on the first round of each
+match only, so the decision cannot depend on the match itself, against both the partner's overall record and whether
+the partner betrayed *other* agents (third-party response). With reputation off the same measure is a control.
+
+The four standard conditions (baseline, talk, watch, talk + watch) run with the same agents and seed; `--seeds` repeats
+them and reports mean ± standard deviation. See `ipd-society/README.md` for the design, metrics and limitations.
+
+**Status of the evidence:** the harness is tested offline (55 tests) and has had one tiny run with a local 3B model
+(20 calls, 0 failures). That shows the pipeline works with a real model; it says nothing yet about LLM behaviour. The
+experiments in the project's "Suggested next experiments" section are the next step.
 
 ---
 
