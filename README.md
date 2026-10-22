@@ -208,7 +208,17 @@ pytest          # 102 tests, about 20 seconds, no network
 * **LLM player**: against a stubbed client: retries, neutral fallback, abort after repeated failures, 429 abort, trace contents, token accounting, memory surviving between matches, frozen behaviour.
 * **Memory and scorecard**: de-duplication, ranking, regret/efficiency numbers, the Beta/Beta collapse being flagged, fallbacks reported apart from play quality.
 * **Pipeline** (offline `mock` provider): full run writes every artifact; training resumes after a mid-run LLM outage without repeating matches; corrupt checkpoint is reported; tournaments are reproducible from a seed and resume to identical results; `--tiers all`, `--eval-only`, `--show-prompt`, clean stop with exit code 2.
-* **A real model**: the complete pipeline ran on a local `qwen2.5:3b` (Ollama) for two tiers with no failed calls. At that scale (2 matches per opponent) results are too noisy to rank the tiers, and this small model did not learn to exploit Tat For Tit (10% efficiency in training), which the scorecard shows directly.
+* **A real model**: the complete pipeline ran on a local `qwen2.5:3b` (Ollama) for all five tiers (`--tiers all`, 3 strategies x 3 matches x 6 rounds, seed 11): 54 training turns per tier, **0 retries, 0 fallbacks**, so every number below reflects the model, not the harness.
+
+  | Tier | Tournament efficiency | Alpha rate | Identification |
+  |---|---|---|---|
+  | `t1_informed` | 55% | 85% | n/a |
+  | `t2_named` | 49% | 100% | n/a |
+  | `t3_pool_hint` | 49% | 100% | 33% |
+  | `t4_blind` | 49% | 100% | 0% |
+  | `t5_open_ended` | 49% | 100% | 0% |
+
+  What this shows: the scorecard tells the tiers apart. Only `t1` (which is handed the counters) changed behaviour at all, and only partly: it exploited Always Alpha at 78-87% efficiency but ignored "play Beta every round" against Tat For Tit and stayed at 10%. Only `t3` produced any correct identification (39-56% in training). In `t2`-`t5` this 3B model plays Alpha every round regardless, the opposite failure from the old run's Beta collapse, and the scorecard flags it (60% efficiency against Always Alpha, 10% against Tat For Tit). With 3 matches per opponent and one seed, differences of a few points are not significant; the pattern (only `t1` moves, only `t3` identifies) is the finding.
 
 **Not yet validated**: whether the new prompts beat the old ones on a capable model, and the comparison between tiers at a meaningful sample size. Both need runs with more matches (`matches_per_strategy = 5` or more) on a stronger model; `--tiers all` and the scorecard are built for exactly that. LLM output is not deterministic even at low temperature, so repeat runs before drawing conclusions.
 
