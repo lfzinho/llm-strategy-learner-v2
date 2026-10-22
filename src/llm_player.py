@@ -1,8 +1,10 @@
 import os
 import time
 import warnings
-from typing import List, Literal, Optional, Tuple
+from urllib.parse import urlparse
+from typing import Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field
+from rich.console import Console
 
 import instructor
 from openai import OpenAI
@@ -64,6 +66,8 @@ class LLMPlayer(Player):
         temperature: float = 0.2,
         max_rpm: int = 30,
         max_rpd: int = 1000,
+        request_timeout: float = 60.0,
+        console: Optional[Console] = None,
     ):
         super().__init__(name)
         self.strategy_name = "LLM Strategy Learner V2"
@@ -73,6 +77,7 @@ class LLMPlayer(Player):
         self.custom_reflection_template = custom_reflection_template
         self.known_strategies = known_strategies
         self.temperature = temperature
+        self.console = console or Console()
 
         if self.provider == "gemini":
             self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
@@ -92,7 +97,14 @@ class LLMPlayer(Player):
         self.freeze_notes: bool = False
         self.last_opponent_name: Optional[str] = None
 
-        self.usage_tracker = UsageTracker(max_rpm=max_rpm, max_rpd=max_rpd)
+        self.request_timeout = 180.0 if self.provider == "ollama" and request_timeout == 60.0 else request_timeout
+        self._ollama_error_reported = False
+        self.usage_tracker = UsageTracker(
+            max_rpm=max_rpm,
+            max_rpd=max_rpd,
+            console=self.console,
+            enabled=self.provider != "ollama",
+        )
         self._init_client()
 
     def _init_client(self):
@@ -109,6 +121,7 @@ class LLMPlayer(Player):
             base_client = OpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=api_key or "missing_key",
+                timeout=self.request_timeout,
                 default_headers={
                     "HTTP-Referer": "https://github.com/lfzinho/llm-strategy-learner",
                     "X-Title": "LLM Strategy Learner V2",
@@ -116,11 +129,23 @@ class LLMPlayer(Player):
             )
             self.client = instructor.from_openai(base_client, mode=instructor.Mode.JSON)
         else:  # ollama
-            ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434/v1")
-            if not ollama_url.endswith("/v1"):
-                ollama_url = ollama_url.rstrip("/") + "/v1"
-            base_client = OpenAI(base_url=ollama_url, api_key="ollama")
+            ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+            if "://" not in ollama_url:
+                ollama_url = "http://" + ollama_url
+            ollama_url = ollama_url.rstrip("/")
+            if ollama_url.endswith("/v1"):
+                ollama_url = ollama_url[:-3].rstrip("/")
+            self.ollama_base_url = ollama_url
+            base_client = OpenAI(
+                base_url=f"{ollama_url}/v1",
+                api_key="ollama",
+                timeout=self.request_timeout,
+            )
             self.client = instructor.from_openai(base_client, mode=instructor.Mode.JSON)
+
+    def set_console(self, console: Console):
+        self.console = console
+        self.usage_tracker.set_console(console)
 
     def play(self) -> Move:
         prompt = build_turn_prompt(
@@ -133,6 +158,7 @@ class LLMPlayer(Player):
             mode=self.prompt_mode,
             custom_system_prompts=self.custom_system_prompts,
             known_strategies=self.known_strategies,
+            opponent_strategy=self.last_opponent_name,
         )
 
         consecutive_429s = 0
@@ -171,10 +197,9 @@ class LLMPlayer(Player):
 
                 # Visual rich terminal output
                 try:
-                    from rich.console import Console
                     from rich.panel import Panel
                     from rich.table import Table
-                    console = Console()
+                    console = self.console
                     move_style = "[bold green]COOPERATE 🤝[/bold green]" if decision == "COOPERATE" else "[bold red]DEFECT ⚔️[/bold red]"
                     table = Table(show_header=False, box=None, padding=(0, 1))
                     table.add_row("[bold cyan]Model:[/bold cyan]", f"[dim]{self.model_name}[/dim] ({self.provider})")
@@ -207,7 +232,17 @@ class LLMPlayer(Player):
                     print(f"[RateLimit 429] Sleeping for {sleep_sec}s before retry {attempt + 1}/{max_retries}...")
                     time.sleep(sleep_sec)
                 else:
-                    print(f"LLM API Error on turn: {e}. Defaulting to DEFECT.")
+                    if self.provider == "ollama" and not self._ollama_error_reported:
+                        self._ollama_error_reported = True
+                        print(
+                            f"Ollama request failed for model '{self.model_name}' at "
+                            f"'{self.ollama_base_url}'. The local server must be running "
+                            "and the model must be installed (try `ollama serve` and "
+                            f"`ollama pull {self.model_name}`). "
+                            f"Timeout is {self.request_timeout:.0f}s. Details: {e}"
+                        )
+                    else:
+                        print(f"LLM request failed on turn: {e}. Defaulting to DEFECT.")
                     return Move.DEFECT
 
         return Move.DEFECT
@@ -260,7 +295,7 @@ class LLMPlayer(Player):
                 from rich.console import Console
                 from rich.panel import Panel
                 from rich.table import Table
-                console = Console()
+                console = self.console
                 table = Table(show_header=False, box=None, padding=(0, 1))
                 table.add_row("[bold cyan]Match Score:[/bold cyan]", f"[bold yellow]{self.score}[/bold yellow]")
                 table.add_row("[bold cyan]Diagnosed Archetype:[/bold cyan]", f"[bold magenta]{reflection_obj.identified_archetype}[/bold magenta]")

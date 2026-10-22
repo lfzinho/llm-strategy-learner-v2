@@ -1,13 +1,16 @@
 import itertools
+import random
 from typing import Any, Dict, List, Optional, Tuple
 try:
     from src.player import Player
     from src.game_machine import GameMachine
-    from src.config import TournamentScoringConfig
+    from src.config import NormalRoundsConfig, RoundsPerMatchConfig, TournamentScoringConfig, describe_rounds_per_match
+    from src.progress import ProgressTracker
 except ImportError:
     from player import Player
     from game_machine import GameMachine
-    from config import TournamentScoringConfig
+    from config import NormalRoundsConfig, RoundsPerMatchConfig, TournamentScoringConfig, describe_rounds_per_match
+    from progress import ProgressTracker
 
 
 class TournamentMatchResult:
@@ -58,7 +61,7 @@ class RoundRobinTournament:
         self,
         players: List[Player],
         matches_per_pairing: int = 5,
-        rounds_per_match: int = 5,
+        rounds_per_match: RoundsPerMatchConfig = NormalRoundsConfig(),
         error_rate: float = 0.0,
         scoring_config: Optional[TournamentScoringConfig] = None,
     ):
@@ -71,6 +74,12 @@ class RoundRobinTournament:
         self.match_results: List[TournamentMatchResult] = []
         # Key: (p1_name, p2_name) -> dict with scores and W-D-L from p1's perspective
         self.head_to_head: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self.progress = ProgressTracker()
+        self.random = random.Random()
+
+        for player in self.players:
+            if hasattr(player, "set_console"):
+                player.set_console(self.progress.console)
 
         # Reset all player scores
         for p in self.players:
@@ -81,6 +90,10 @@ class RoundRobinTournament:
         print(f"🏆 PHASE 2: ROUND-ROBIN CHAMPIONSHIP TOURNAMENT")
         print(f"Participants: {len(self.players)} | Pairings: {len(self.players) * (len(self.players) - 1) // 2} | Matches/Pair: {self.matches_per_pairing}")
         print("=" * 60)
+
+        total_matches = len(self.players) * (len(self.players) - 1) // 2 * self.matches_per_pairing
+        self.progress.start()
+        self.progress.add_overall_task("Tournament progress", total=total_matches)
 
         # Initialize head to head table
         player_names = [p.name for p in self.players]
@@ -115,20 +128,27 @@ class RoundRobinTournament:
         # Generate all pairings (combinations of 2 players)
         pairings = list(itertools.combinations(self.players, 2))
         total_pairings = len(pairings)
+        overall_match_count = 0
 
         for pair_idx, (p1, p2) in enumerate(pairings, 1):
             print(f"\n[Pairing {pair_idx}/{total_pairings}] {p1.name} vs {p2.name} ({self.matches_per_pairing} matches)...")
 
             for m_idx in range(self.matches_per_pairing):
+                overall_match_count += 1
+                rounds_this_match = self._sample_rounds()
+                self.progress.reset_current(f"Current match: {p1.name} vs {p2.name}", rounds_this_match)
+
                 # Inform players of opponent if supported
                 if hasattr(p1, "last_opponent_name"):
                     p1.last_opponent_name = p2.name
                 if hasattr(p2, "last_opponent_name"):
                     p2.last_opponent_name = p1.name
 
-                for _ in range(self.rounds_per_match):
+                for round_idx in range(rounds_this_match):
                     self.game_machine.play_game(p1, p2)
+                    self.progress.update_current(round_idx + 1)
 
+                self.progress.update_overall(overall_match_count)
                 s1 = p1.score
                 s2 = p2.score
 
@@ -150,7 +170,7 @@ class RoundRobinTournament:
                     match_index=m_idx + 1,
                     player1_score=s1,
                     player2_score=s2,
-                    rounds_played=self.rounds_per_match,
+                    rounds_played=rounds_this_match,
                 )
                 self.match_results.append(res)
 
@@ -159,8 +179,8 @@ class RoundRobinTournament:
                 player_stats[p2.name]["matches_played"] += 1
                 player_stats[p1.name]["total_ipd_score"] += s1
                 player_stats[p2.name]["total_ipd_score"] += s2
-                player_stats[p1.name]["total_rounds"] += self.rounds_per_match
-                player_stats[p2.name]["total_rounds"] += self.rounds_per_match
+                player_stats[p1.name]["total_rounds"] += rounds_this_match
+                player_stats[p2.name]["total_rounds"] += rounds_this_match
 
                 # Update Head-to-Head
                 h2h_12 = self.head_to_head[(p1.name, p2.name)]
@@ -196,6 +216,8 @@ class RoundRobinTournament:
                     h2h_12["draws"] += 1
                     h2h_21["draws"] += 1
 
+        self.progress.stop()
+
         # Calculate averages and sort leaderboard
         leaderboard = []
         for p_name, stats in player_stats.items():
@@ -223,5 +245,10 @@ class RoundRobinTournament:
             "all_matches": [m.to_dict() for m in self.match_results],
             "total_matches": len(self.match_results),
             "matches_per_pairing": self.matches_per_pairing,
-            "rounds_per_match": self.rounds_per_match,
+            "rounds_per_match": describe_rounds_per_match(self.rounds_per_match),
         }
+
+    def _sample_rounds(self) -> int:
+        if isinstance(self.rounds_per_match, NormalRoundsConfig):
+            return max(1, round(self.random.gauss(self.rounds_per_match.average, self.rounds_per_match.std_dev)))
+        return self.rounds_per_match

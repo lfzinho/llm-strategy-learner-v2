@@ -8,10 +8,12 @@ An experiment exploring how a Large Language Model (**OpenRouter**, **Google Gem
 
 1. **Zero Environmental Noise (Deterministic IPD)**:
    - Eliminated the 5% move-flip error rate from V1 to enable predictable, reproducible game-theoretic deduction and eliminate accidental retaliation spirals.
-2. **Dynamic Strategy Identification Prompts (3 Configurable Modes)**:
+2. **Dynamic Strategy Identification Prompts (4 Configurable Modes)**:
    - **Mode 1 (`explicit_strategies`)**: Agent is given the exact candidate strategy catalog and tasked with probing early to recognize and counter them.
    - **Mode 2 (`generic_archetypes`)**: Agent knows classical heuristics exist (reciprocal, unforgiving, exploitative, probing) and formulates hypotheses to deduce the decision rule.
    - **Mode 3 (`blind_optimization`)**: Tabula rasa — agent is given only IPD rules and payoff matrix, optimizing purely through empirical observation.
+   - **Mode 4 (`revealed_strategy`)**: Agent is told the exact strategy identity it is facing and can focus on the optimal counter-strategy.
+   - Every mode is told that matches are `Normal(10, 1)` rounds long, without revealing the exact sampled length.
 3. **Structured Sequential Block Training**:
    - Replaces random opponent selection with 5 consecutive matches per strategy archetype (*Always Cooperate, Always Defect, Tit For Tat, Suspicious TFT, Tit For Two Tats, Tat For Tit, Random, Detective*), allowing deep probing and reflection.
 4. **🌙 The Dreamer Phase (Memory Consolidation)**:
@@ -82,6 +84,10 @@ OPENROUTER_MODEL=stealth/ox-alpha
 # Google Gemini Direct (Alternative)
 GEMINI_API_KEY=your_gemini_key
 GEMINI_MODEL=gemini-2.5-flash
+
+# Local Ollama (Alternative; start Ollama before running)
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=llama3.2
 ```
 
 ### 3. Run the Simulation
@@ -90,6 +96,21 @@ GEMINI_MODEL=gemini-2.5-flash
 ```powershell
 python main.py
 ```
+
+To use Ollama for a run, set the provider and model in `.env`:
+
+```powershell
+python main.py --provider ollama
+```
+
+You can override either value for one run without editing `.env`:
+
+```powershell
+python main.py --provider ollama --model qwen2.5:7b
+```
+
+Ollama must be running locally and the selected model must already be available
+(`ollama pull qwen2.5:7b`).
 
 #### B. Quick Classical Dry Run (Zero LLM API cost):
 Runs the championship tournament exclusively between classical strategies to verify scoring and reporting instantly:
@@ -147,7 +168,7 @@ explicit_strategies = """You are an expert game theory agent playing the Iterate
 
 [training]
 matches_per_strategy = 5
-rounds_per_match = 5
+rounds_per_match = { average = 10.0, std_dev = 1.0 }
 strategies = [
     "AlwaysCooperate", "AlwaysDefect", "TitForTat",
     "SuspiciousTitForTat", "TitForTwoTats", "TatForTit",
@@ -156,7 +177,7 @@ strategies = [
 
 [evaluation]
 matches_per_pairing = 5
-rounds_per_match = 5
+rounds_per_match = { average = 10.0, std_dev = 1.0 }
 ```
 
 ---

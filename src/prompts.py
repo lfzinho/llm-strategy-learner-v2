@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 
+MATCH_LENGTH_DESCRIPTION = "Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance."
+
 try:
     from src.constants import Move
     from src.player_classes import STRATEGY_DESCRIPTIONS
@@ -38,6 +40,7 @@ def build_system_prompt(
     mode: str = "explicit_strategies",
     custom_system_prompts: Optional[Dict[str, str]] = None,
     known_strategies: Optional[List[str]] = None,
+    opponent_strategy: Optional[str] = None,
 ) -> str:
     mode_key = mode.lower()
     known_desc = format_known_strategies(known_strategies)
@@ -45,7 +48,11 @@ def build_system_prompt(
     # Check if a custom system prompt was defined in config.toml
     if custom_system_prompts and mode_key in custom_system_prompts and custom_system_prompts[mode_key].strip():
         template = custom_system_prompts[mode_key]
-        return template.replace("{known_strategies_descriptions}", known_desc)
+        return (
+            template
+            .replace("{known_strategies_descriptions}", known_desc)
+            .replace("{opponent_strategy}", opponent_strategy or "Unknown")
+        )
 
     # Built-in fallback templates
     if mode_key == "explicit_strategies":
@@ -53,6 +60,7 @@ def build_system_prompt(
 
 ENVIRONMENT & RULES:
 - The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- {MATCH_LENGTH_DESCRIPTION}
 - Payoff Matrix:
   * Both Cooperate: 3 points each
   * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
@@ -64,12 +72,11 @@ You are competing against an opponent using one of the following classical strat
 {known_desc}
 
 YOUR PRIMARY OBJECTIVE:
-1. Identify the opponent's strategy as early as possible in the match (within rounds 1-2). Use opening moves to test/probe their reaction if necessary.
-2. Once the opponent's strategy is identified, execute the mathematically optimal counter-play to maximize your cumulative score:
-   - Against unconditional cooperators (Always Cooperate): Defect to score maximum points (5 per round).
-   - Against unconditional defectors (Always Defect): Defect to avoid exploitation (1 per round vs 0).
-   - Against reciprocal players (Tit For Tat, Tit For Two Tats): Cooperate to secure mutual cooperation (3 per round).
-   - Against probing players (Detective): Respond firmly to probes so they settle into mutual cooperation.
+1. Infer the opponent's decision rule from the observed move history. The strategy descriptions are clues for diagnosis, not answers for your counter-policy.
+2. Choose the move that maximizes YOUR TOTAL CUMULATIVE SCORE over the remaining rounds. Score differential is secondary and must never replace your own score as the objective.
+3. Independently derive the policy from the payoff matrix and the opponent's observed transition rule. Compare candidate continuations: mutual cooperation pays 3 each round, mutual defection pays 1 each round, exploiting cooperation pays 5 for one round but may trigger retaliation, and cooperating against defection pays 0.
+4. Balance immediate payoff against future consequences in this repeated, finite-horizon game. Do not call mutual defection optimal merely because it is a one-shot Nash equilibrium.
+5. Explain the policy you derive from behavioral evidence and payoffs. Do not use a memorized strategy-to-response table.
 """
 
     elif mode_key == "generic_archetypes":
@@ -77,6 +84,7 @@ YOUR PRIMARY OBJECTIVE:
 
 ENVIRONMENT & RULES:
 - The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
 - Payoff Matrix:
   * Both Cooperate: 3 points each
   * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
@@ -89,8 +97,10 @@ Opponents may be purely cooperative, purely exploitative, strictly reciprocal, f
 
 YOUR PRIMARY OBJECTIVE:
 1. Rapidly formulate a hypothesis about what decision rule or heuristic your opponent follows.
-2. Test their reaction to your moves in the opening rounds.
-3. Optimize your play dynamically once you detect whether they are forgiving, retaliatory, exploitative, or random.
+2. Test their reaction to your moves in the opening rounds without assuming that defection is inherently safer.
+3. Optimize YOUR TOTAL CUMULATIVE SCORE dynamically. Compare the immediate payoff and expected future payoff of cooperation and defection using the observed transition rule.
+4. Treat mutual defection as one possible outcome, not as a universal objective or proof of optimality.
+5. Explain the policy you independently derive from the observed behavior and payoff matrix.
 """
 
     elif mode_key == "blind_optimization":
@@ -98,6 +108,7 @@ YOUR PRIMARY OBJECTIVE:
 
 ENVIRONMENT & RULES:
 - The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
 - Payoff Matrix:
   * Both Cooperate: 3 points each
   * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
@@ -105,11 +116,22 @@ ENVIRONMENT & RULES:
   * Both Defect: 1 point each
 
 STRATEGY OPTIMIZATION TASK:
-Your goal is to maximize your cumulative score in the Iterated Prisoner's Dilemma.
-Observe the opponent's actions across rounds, detect behavioral patterns, and choose the moves that yield the highest possible long-term payoff.
+Your goal is to maximize YOUR TOTAL CUMULATIVE SCORE in the Iterated Prisoner's Dilemma. Do not optimize score differential as a substitute objective.
+Observe the opponent's actions across rounds, infer the rule mapping history to future moves, and independently derive the best response from the payoff matrix. Compare cooperation and defection over the remaining horizon; do not assume that the one-shot Nash equilibrium remains the best iterated policy.
 """
+    elif mode_key == "revealed_strategy":
+        return """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
+
+ENVIRONMENT & RULES:
+- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
+- Your opponent is playing this strategy: {opponent_strategy}
+
+STRATEGY RESPONSE TASK:
+Use the revealed strategy identity only as a hypothesis about behavior. Verify it against observed moves, then independently derive the mathematically optimal counter-strategy from the payoff matrix and remaining horizon. Maximize YOUR TOTAL CUMULATIVE SCORE; score differential is secondary.
+""".format(opponent_strategy=opponent_strategy or "Unknown")
     else:
-        raise ValueError(f"Unknown prompt mode: '{mode}'. Available: explicit_strategies, generic_archetypes, blind_optimization, custom")
+        raise ValueError(f"Unknown prompt mode: '{mode}'. Available: explicit_strategies, generic_archetypes, blind_optimization, revealed_strategy, custom")
 
 
 def build_turn_prompt(
@@ -122,8 +144,9 @@ def build_turn_prompt(
     mode: str = "explicit_strategies",
     custom_system_prompts: Optional[Dict[str, str]] = None,
     known_strategies: Optional[List[str]] = None,
+    opponent_strategy: Optional[str] = None,
 ) -> str:
-    system_intro = build_system_prompt(mode, custom_system_prompts, known_strategies)
+    system_intro = build_system_prompt(mode, custom_system_prompts, known_strategies, opponent_strategy)
     history_text = format_history_lines(game_history)
     short_notes_text = format_notes(short_lasting_notes)
 
@@ -144,6 +167,7 @@ LONG-TERM STRATEGY NOTES:
 
     return f"""{system_intro}
 MATCH STATUS:
+- Match length: Normal(10, 1) rounds (exact length not revealed in advance)
 - Round: {round_number}
 - Your Current Match Score: {my_score}
 - Opponent Current Match Score: {opp_score}
@@ -187,7 +211,7 @@ def build_reflection_prompt(
             .replace("{long_notes_text}", long_notes_text)
         )
 
-    return f"""You just finished a 5-round match of Iterated Prisoner's Dilemma. {revealed_opp}
+    return f"""You just finished a Normal(10, 1)-round match of Iterated Prisoner's Dilemma. {revealed_opp}
 Final Score: You = {my_score} pts | Opponent = {opp_score} pts
 
 MATCH MOVE HISTORY:

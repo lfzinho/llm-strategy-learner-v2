@@ -1,57 +1,19 @@
 # ==============================================================================
-# LLM Strategy Learner V2 - Global Configuration (TOML)
+# LLM Strategy Learner V2 - Experiment Configuration
 # ==============================================================================
-# This TOML configuration file controls the entire experiment lifecycle:
-# 1. LLM Model, Provider, & API Rate Limits
-# 2. Game Theory Environment & Payoffs (0% Noise Deterministic IPD)
-# 3. Prompt Modes & Full System Prompts (Easily customizable with multi-line text)
-# 4. Phase 1: Sequential Block Training (5 matches per opponent archetype)
-# 5. Phase 2: Dreamer Memory Synthesis (Consolidating notes into Master Playbook)
-# 6. Phase 3: Round-Robin Championship Tournament (All-play-all ranking & cross-table)
-# 7. Multi-Channel Reporting (Rich TUI, Markdown, JSON, HTML dashboard)
+# Keep this file focused on choices that define an experiment. Fixed mechanics,
+# scoring, reporting formats, and API limits use code defaults.
 
 [experiment]
-name = "v2_championship_tournament"
-seed = 42
 output_dir = "output"
 
 [llm]
-# Provider options: "openrouter", "gemini", "ollama"
-provider = "openrouter"
+# Provider and model are configured via .env:
+#   LLM_PROVIDER=openrouter | gemini | ollama
+#   OPENROUTER_MODEL=...  GEMINI_MODEL=...  OLLAMA_MODEL=...
 
-# Model name:
-# - For OpenRouter: "stealth/ox-alpha", "google/gemini-2.5-flash", "meta-llama/llama-3.3-70b-instruct", etc.
-# - For Gemini direct: "gemini-2.5-flash"
-# - For Ollama: "llama3", "mistral", etc.
-model_name = "stealth/ox-alpha"
-
-# Sampling temperature (0.0 - 1.0). Lower values (0.1 - 0.2) ensure analytical, consistent play.
+# Sampling temperature (0.0 - 1.0).
 temperature = 0.2
-
-# Maximum retries on API timeout or network failure
-max_retries = 3
-
-[llm.rate_limit]
-# Rate limits to prevent API 429 quota exhaustion
-max_rpm = 30   # Requests Per Minute
-max_rpd = 1000 # Requests Per Day
-
-[environment]
-# Error rate (0.0 = completely deterministic, no noise).
-# In V2, we eliminate noise so the LLM can deduce strategies predictably.
-error_rate = 0.0
-
-# Iterated Prisoner's Dilemma Payoff Matrix: [Player Payoff, Opponent Payoff]
-# Standard Axelrod IPD values:
-# - Both Cooperate (Reward): 3, 3
-# - Defect vs Cooperate (Temptation): 5, 0
-# - Cooperate vs Defect (Sucker's Payoff): 0, 5
-# - Both Defect (Punishment): 1, 1
-[environment.payoff_matrix]
-cooperate_cooperate = [3, 3]
-defect_cooperate = [5, 0]
-cooperate_defect = [0, 5]
-defect_defect = [1, 1]
 
 # ==============================================================================
 # PROMPT CONFIGURATION & SYSTEM PROMPTS
@@ -65,6 +27,7 @@ defect_defect = [1, 1]
 #                             strategies exist, but not their specific class names.
 # 3. "blind_optimization"  -> (Mode 3 - Hard / Tabula Rasa): Only pure IPD rules and payoff matrix;
 #                             no hints about classical strategies.
+# 4. "revealed_strategy"    -> The exact opponent strategy identity is provided to the agent.
 prompt_mode = "explicit_strategies"
 
 # ------------------------------------------------------------------------------
@@ -78,6 +41,7 @@ explicit_strategies = """You are an expert game theory agent playing the Iterate
 
 ENVIRONMENT & RULES:
 - The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
 - Payoff Matrix:
   * Both Cooperate: 3 points each
   * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
@@ -89,12 +53,11 @@ You are competing against an opponent using one of the following classical strat
 {known_strategies_descriptions}
 
 YOUR PRIMARY OBJECTIVE:
-1. Identify the opponent's strategy as early as possible in the match (within rounds 1-2). Use opening moves to test/probe their reaction if necessary.
-2. Once the opponent's strategy is identified, execute the mathematically optimal counter-play to maximize your cumulative score:
-   - Against unconditional cooperators (Always Cooperate): Defect to score maximum points (5 per round).
-   - Against unconditional defectors (Always Defect): Defect to avoid exploitation (1 per round vs 0).
-   - Against reciprocal players (Tit For Tat, Tit For Two Tats): Cooperate to secure mutual cooperation (3 per round).
-   - Against probing players (Detective): Respond firmly to probes so they settle into mutual cooperation.
+1. Infer the opponent's decision rule from the observed move history. The strategy descriptions are clues for diagnosis, not answers for your counter-policy.
+2. Choose the move that maximizes YOUR TOTAL CUMULATIVE SCORE over the remaining rounds. Score differential is secondary and must never replace your own score as the objective.
+3. Independently derive the policy from the payoff matrix and the opponent's observed transition rule. Compare candidate continuations: mutual cooperation pays 3 each round, mutual defection pays 1 each round, exploiting cooperation pays 5 for one round but may trigger retaliation, and cooperating against defection pays 0.
+4. Balance immediate payoff against future consequences in this repeated, finite-horizon game. Do not call mutual defection optimal merely because it is a one-shot Nash equilibrium.
+5. Explain the policy you derive from behavioral evidence and payoffs. Do not use a memorized strategy-to-response table.
 """
 
 # Mode 2: Classical Heuristics System Prompt
@@ -102,6 +65,7 @@ generic_archetypes = """You are an expert game theory agent playing the Iterated
 
 ENVIRONMENT & RULES:
 - The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
 - Payoff Matrix:
   * Both Cooperate: 3 points each
   * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
@@ -114,8 +78,10 @@ Opponents may be purely cooperative, purely exploitative, strictly reciprocal, f
 
 YOUR PRIMARY OBJECTIVE:
 1. Rapidly formulate a hypothesis about what decision rule or heuristic your opponent follows.
-2. Test their reaction to your moves in the opening rounds.
-3. Optimize your play dynamically once you detect whether they are forgiving, retaliatory, exploitative, or random.
+2. Test their reaction to your moves in the opening rounds without assuming that defection is inherently safer.
+3. Optimize YOUR TOTAL CUMULATIVE SCORE dynamically. Compare the immediate payoff and expected future payoff of cooperation and defection using the observed transition rule.
+4. Treat mutual defection as one possible outcome, not as a universal objective or proof of optimality.
+5. Explain the policy you independently derive from the observed behavior and payoff matrix.
 """
 
 # Mode 3: Tabula Rasa System Prompt
@@ -123,6 +89,7 @@ blind_optimization = """You are an expert game theory agent playing the Iterated
 
 ENVIRONMENT & RULES:
 - The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
 - Payoff Matrix:
   * Both Cooperate: 3 points each
   * You Defect, Opponent Cooperates: You get 5 points, Opponent gets 0
@@ -130,15 +97,26 @@ ENVIRONMENT & RULES:
   * Both Defect: 1 point each
 
 STRATEGY OPTIMIZATION TASK:
-Your goal is to maximize your cumulative score in the Iterated Prisoner's Dilemma.
-Observe the opponent's actions across rounds, detect behavioral patterns, and choose the moves that yield the highest possible long-term payoff.
+Your goal is to maximize YOUR TOTAL CUMULATIVE SCORE in the Iterated Prisoner's Dilemma. Do not optimize score differential as a substitute objective.
+Observe the opponent's actions across rounds, infer the rule mapping history to future moves, and independently derive the best response from the payoff matrix. Compare cooperation and defection over the remaining horizon; do not assume that the one-shot Nash equilibrium remains the best iterated policy.
+"""
+
+revealed_strategy = """You are an expert game theory agent playing the Iterated Prisoner's Dilemma.
+
+ENVIRONMENT & RULES:
+- The environment is completely deterministic (0% error rate). Every move you and your opponent make executes exactly as intended.
+- Each match is Normal(10, 1) rounds long; the exact number of rounds is not revealed in advance.
+- Your opponent is playing this strategy: {opponent_strategy}
+
+STRATEGY RESPONSE TASK:
+Use the revealed strategy identity only as a hypothesis about behavior. Verify it against observed moves, then independently derive the mathematically optimal counter-strategy from the payoff matrix and remaining horizon. Maximize YOUR TOTAL CUMULATIVE SCORE; score differential is secondary.
 """
 
 # ------------------------------------------------------------------------------
 # REFLECTION & DREAMER PROMPTS
 # ------------------------------------------------------------------------------
 [prompts.reflection]
-prompt_template = """You just finished a 5-round match of Iterated Prisoner's Dilemma. {revealed_opponent_info}
+prompt_template = """You just finished a Normal(10, 1)-round match of Iterated Prisoner's Dilemma. {revealed_opponent_info}
 Final Score: You = {my_score} pts | Opponent = {opp_score} pts
 
 MATCH MOVE HISTORY:
@@ -182,19 +160,24 @@ The Master Strategy Playbook MUST include:
    - End-game moves.
 
 Output the synthesized playbook in clear, dense, actionable Markdown.
+
+CRITICAL REASONING REQUIREMENTS:
+- The objective is the agent's total cumulative score, not score differential.
+- Do not treat mutual defection as universally optimal. It is a one-shot Nash equilibrium, while repeated interaction can make mutual cooperation higher scoring.
+- Do not copy repeated reflections as evidence. Check every claimed policy against the payoff matrix and observed move sequence.
+- Independently derive each policy from behavioral evidence. Do not produce a canned strategy-to-policy table.
+- For every archetype, explain why cooperation or defection is optimal over the remaining horizon, including retaliation, forgiveness, and end-game effects.
 """
 
 # ==============================================================================
 # PHASE 1: SEQUENTIAL BLOCK TRAINING CONFIGURATION
 # ==============================================================================
 [training]
-enabled = true
-
-# Number of consecutive matches to play against EACH strategy archetype
+# Number of consecutive matches against each strategy archetype.
 matches_per_strategy = 5
 
-# Number of rounds per match
-rounds_per_match = 5
+# Sampled number of rounds per match: Normal(average, standard deviation)
+rounds_per_match = { average = 10.0, std_dev = 1.0 }
 
 # The list of strategy archetypes to train against in sequence
 strategies = [
@@ -208,22 +191,15 @@ strategies = [
     "Detective"
 ]
 
-[training.dreamer]
-# Whether to run the Dreamer memory synthesis phase after all training blocks complete
-enabled = true
-temperature = 0.2
-
 # ==============================================================================
 # PHASE 2: ROUND-ROBIN CHAMPIONSHIP TOURNAMENT CONFIGURATION
 # ==============================================================================
 [evaluation]
-enabled = true
-
 # Number of matches each pairing plays against each other
 matches_per_pairing = 5
 
-# Number of rounds per match
-rounds_per_match = 5
+# Sampled number of rounds per match: Normal(average, standard deviation)
+rounds_per_match = { average = 10.0, std_dev = 1.0 }
 
 # Competitor line-up:
 # - "LLMPlayer": The trained agent equipped with the synthesized Master Playbook
@@ -240,17 +216,3 @@ participants = [
     "Detective"
 ]
 
-[evaluation.scoring]
-# Chess tournament match points
-win_match_points = 1.0
-draw_match_points = 0.5
-loss_match_points = 0.0
-
-# ==============================================================================
-# REPORTING & DASHBOARDS
-# ==============================================================================
-[reporting]
-export_html = true
-export_markdown = true
-export_json = true
-terminal_style = "rich"

@@ -2,17 +2,23 @@ import time
 import json
 import os
 from datetime import datetime
+from typing import Optional
+
+from rich.console import Console
 
 class DailyLimitReachedException(Exception):
     pass
 
 class UsageTracker:
-    def __init__(self, log_file="output/api_usage.json", max_rpm=30, max_rpd=1500):
+    def __init__(self, log_file="output/api_usage.json", max_rpm=30, max_rpd=1500, console: Optional[Console] = None, enabled: bool = True):
         self.log_file = log_file
         self.max_rpm = max_rpm
         self.max_rpd = max_rpd
+        self.console = console
+        self.enabled = enabled
         self.requests = []
-        self._load_log()
+        if self.enabled:
+            self._load_log()
         
     def _load_log(self):
         if os.path.exists(self.log_file):
@@ -41,15 +47,27 @@ class UsageTracker:
     def get_rpd(self):
         return len(self.requests)
 
+    def set_console(self, console: Console):
+        self.console = console
+
+    def _print(self, message: str):
+        if self.console is not None:
+            self.console.print(message)
+        else:
+            print(message)
+
     def wait_and_record(self):
         """
         Enforces RPM limits and records the request.
         """
+        if not self.enabled:
+            return
+
         now = time.time()
         
         # Check Daily limit (RPD)
         if self.get_rpd() >= self.max_rpd:
-            print(f"\n[Tracker] CRITICAL: You have reached the daily limit of {self.max_rpd} RPD.")
+            self._print(f"[Tracker] CRITICAL: You have reached the daily limit of {self.max_rpd} RPD.")
             raise DailyLimitReachedException(f"Daily limit of {self.max_rpd} reached.")
             
         # Check Minute limit (RPM)
@@ -59,7 +77,7 @@ class UsageTracker:
             oldest_in_window = min(recent)
             sleep_time = 60.0 - (now - oldest_in_window)
             if sleep_time > 0:
-                print(f"[Tracker] RPM limit ({self.max_rpm}) reached. Sleeping for {sleep_time:.1f}s...")
+                self._print(f"[Tracker] RPM limit ({self.max_rpm}) reached. Sleeping for {sleep_time:.1f}s...")
                 time.sleep(sleep_time)
                 now = time.time() # Update 'now' after sleeping
                 
@@ -67,4 +85,4 @@ class UsageTracker:
         self.requests.append(now)
         self._save_log()
         
-        print(f"[Tracker] Usage: {self.get_rpm()} RPM | {self.get_rpd()} RPD (Daily Limit: {self.max_rpd})")
+        self._print(f"[Tracker] Usage: {self.get_rpm()} RPM | {self.get_rpd()} RPD (Daily Limit: {self.max_rpd})")

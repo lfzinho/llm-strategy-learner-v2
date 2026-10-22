@@ -34,11 +34,30 @@ def parse_args():
         help="Path to global configuration TOML file",
     )
     parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory for generated stories, logs, and reports (for example: output_001)",
+    )
+    parser.add_argument(
         "--mode",
         type=str,
-        choices=["explicit_strategies", "generic_archetypes", "blind_optimization"],
+        choices=["explicit_strategies", "generic_archetypes", "blind_optimization", "revealed_strategy"],
         default=None,
-        help="Override prompt mode (explicit_strategies, generic_archetypes, or blind_optimization)",
+        help="Override prompt mode (explicit_strategies, generic_archetypes, blind_optimization, or revealed_strategy)",
+    )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        choices=["openrouter", "gemini", "ollama"],
+        default=None,
+        help="Override the LLM provider (openrouter, gemini, or ollama)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Override the model name configured in config.toml or .env",
     )
     parser.add_argument(
         "--train-only",
@@ -65,6 +84,12 @@ def main():
     # CLI overrides
     if args.mode:
         config.prompts.prompt_mode = args.mode
+    if args.provider:
+        config.llm.provider = args.provider
+    if args.model:
+        config.llm.model_name = args.model
+    if args.output_dir:
+        config.experiment.output_dir = args.output_dir
 
     try:
         from rich.console import Console
@@ -75,7 +100,7 @@ def main():
                 f"[bold cyan]🎯 LLM Strategy Learner V2[/bold cyan]\n"
                 f"[dim]Opponent Archetype Discovery & Round-Robin Championship[/dim]\n"
                 f"[yellow]Prompt Mode:[/yellow] [bold]{config.prompts.prompt_mode}[/bold] | "
-                f"[green]Noise:[/green] {config.environment.error_rate * 100:.0f}%",
+                "[green]Noise:[/green] 0%",
                 border_style="cyan",
             )
         )
@@ -94,23 +119,23 @@ def main():
             custom_reflection_template=config.prompts.reflection.get("prompt_template"),
             known_strategies=config.training.strategies,
             temperature=config.llm.temperature,
-            max_rpm=config.llm.rate_limit.max_rpm,
-            max_rpd=config.llm.rate_limit.max_rpd,
+            max_rpm=30,
+            max_rpd=1000,
         )
         print(f"Provider: {llm_agent.provider} | Model: {llm_agent.model_name} | Mode: {llm_agent.prompt_mode}")
 
     # =========================================================================
     # Phase 1: Structured Sequential Block Training & Dreamer Phase
     # =========================================================================
-    if config.training.enabled and not args.eval_only and llm_agent is not None:
+    if not args.eval_only and llm_agent is not None:
         training_battery = TrainingBattery(
             llm_player=llm_agent,
             strategies=config.training.strategies,
             matches_per_strategy=config.training.matches_per_strategy,
             rounds_per_match=config.training.rounds_per_match,
-            error_rate=config.environment.error_rate,
-            dreamer_enabled=config.training.dreamer.enabled,
-            dreamer_temperature=config.training.dreamer.temperature,
+            error_rate=0.0,
+            dreamer_enabled=True,
+            dreamer_temperature=0.2,
             dreamer_custom_template=config.prompts.dreamer.get("prompt_template"),
         )
         training_history, master_playbook = training_battery.run_training(
@@ -150,7 +175,7 @@ def main():
             players=tournament_players,
             matches_per_pairing=config.evaluation.matches_per_pairing,
             rounds_per_match=config.evaluation.rounds_per_match,
-            error_rate=config.environment.error_rate,
+            error_rate=0.0,
             scoring_config=config.evaluation.scoring,
         )
 
@@ -164,17 +189,10 @@ def main():
             output_dir=config.experiment.output_dir,
         )
 
-        if config.reporting.terminal_style == "rich":
-            reporter.display_rich_console()
-
-        if config.reporting.export_json:
-            reporter.export_json()
-
-        if config.reporting.export_markdown:
-            reporter.export_markdown()
-
-        if config.reporting.export_html:
-            reporter.export_html()
+        reporter.display_rich_console()
+        reporter.export_json()
+        reporter.export_markdown()
+        reporter.export_html()
 
         print(f"\nTournament complete! All outputs saved to '{config.experiment.output_dir}' directory.")
 

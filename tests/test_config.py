@@ -1,7 +1,7 @@
 import os
 import tempfile
 import pytest
-from src.config import load_config, MasterConfig, EnvironmentConfig
+from src.config import load_config, MasterConfig, EnvironmentConfig, NormalRoundsConfig
 
 
 def test_default_config():
@@ -9,8 +9,21 @@ def test_default_config():
     assert config.environment.error_rate == 0.0
     assert config.prompts.prompt_mode == "explicit_strategies"
     assert config.training.matches_per_strategy == 5
-    assert config.training.rounds_per_match == 5
+    assert config.training.rounds_per_match == NormalRoundsConfig(average=10, std_dev=1)
     assert config.evaluation.matches_per_pairing == 5
+
+
+def test_provider_and_model_are_read_from_environment(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b")
+
+    config = MasterConfig()
+    from src.llm_player import LLMPlayer
+
+    player = LLMPlayer(provider=config.llm.provider)
+
+    assert config.llm.provider == "ollama"
+    assert player.model_name == "qwen2.5:7b"
 
 
 def test_invalid_error_rate():
@@ -28,6 +41,7 @@ def test_load_root_toml_config():
     assert "explicit_strategies" in config.prompts.system_prompts
     assert "generic_archetypes" in config.prompts.system_prompts
     assert "blind_optimization" in config.prompts.system_prompts
+    assert "revealed_strategy" in config.prompts.system_prompts
     assert "prompt_template" in config.prompts.reflection
     assert "prompt_template" in config.prompts.dreamer
 

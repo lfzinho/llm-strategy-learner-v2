@@ -1,7 +1,7 @@
 .env
 venv/
-output/
-output_old/
+/output/
+/output_*/
 .pytest_cache/
 __pycache__/
 *.pyc

@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple, Union
 from pydantic import BaseModel, Field, field_validator
 
 # Python 3.11+ built-in tomllib
@@ -22,11 +22,16 @@ class LLMRateLimitConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    provider: Literal["openrouter", "gemini", "ollama"] = "openrouter"
-    model_name: Optional[str] = "stealth/ox-alpha"
+    provider: Literal["openrouter", "gemini", "ollama"] = Field(
+        default_factory=lambda: os.getenv("LLM_PROVIDER", "openrouter")
+    )
+    model_name: Optional[str] = Field(
+        default=None  # resolved at runtime by LLMPlayer based on provider + env vars
+    )
     temperature: float = 0.2
     max_retries: int = 3
     rate_limit: LLMRateLimitConfig = Field(default_factory=LLMRateLimitConfig)
+
 
 
 class EnvironmentConfig(BaseModel):
@@ -48,7 +53,35 @@ class EnvironmentConfig(BaseModel):
         return v
 
 
-PromptModeType = Literal["explicit_strategies", "generic_archetypes", "blind_optimization", "custom"]
+PromptModeType = Literal["explicit_strategies", "generic_archetypes", "blind_optimization", "revealed_strategy", "custom"]
+
+
+class NormalRoundsConfig(BaseModel):
+    average: float = 10.0
+    std_dev: float = 1.0
+
+    @field_validator("average")
+    @classmethod
+    def validate_average(cls, v: float) -> float:
+        if v < 1:
+            raise ValueError("rounds_per_match average must be at least 1")
+        return v
+
+    @field_validator("std_dev")
+    @classmethod
+    def validate_std_dev(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("rounds_per_match std_dev must be non-negative")
+        return v
+
+
+RoundsPerMatchConfig = Union[int, NormalRoundsConfig]
+
+
+def describe_rounds_per_match(rounds_per_match: RoundsPerMatchConfig) -> str:
+    if isinstance(rounds_per_match, NormalRoundsConfig):
+        return f"Normal({rounds_per_match.average:g}, {rounds_per_match.std_dev:g})"
+    return str(rounds_per_match)
 
 
 class PromptsConfig(BaseModel):
@@ -67,7 +100,7 @@ class DreamerConfig(BaseModel):
 class TrainingConfig(BaseModel):
     enabled: bool = True
     matches_per_strategy: int = 5
-    rounds_per_match: int = 5
+    rounds_per_match: RoundsPerMatchConfig = Field(default_factory=NormalRoundsConfig)
     strategies: List[str] = Field(
         default_factory=lambda: [
             "AlwaysCooperate",
@@ -92,7 +125,7 @@ class TournamentScoringConfig(BaseModel):
 class EvaluationConfig(BaseModel):
     enabled: bool = True
     matches_per_pairing: int = 5
-    rounds_per_match: int = 5
+    rounds_per_match: RoundsPerMatchConfig = Field(default_factory=NormalRoundsConfig)
     participants: List[str] = Field(
         default_factory=lambda: [
             "LLMPlayer",
