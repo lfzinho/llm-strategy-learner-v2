@@ -1,14 +1,14 @@
 import itertools
 import random
 from typing import Any, Dict, List, Optional, Tuple
+import axelrod as axl
+
 try:
-    from src.player import Player
-    from src.game_machine import GameMachine
+    from src.match_runner import play_match
     from src.config import NormalRoundsConfig, RoundsPerMatchConfig, TournamentScoringConfig, describe_rounds_per_match
     from src.progress import ProgressTracker
 except ImportError:
-    from player import Player
-    from game_machine import GameMachine
+    from match_runner import play_match
     from config import NormalRoundsConfig, RoundsPerMatchConfig, TournamentScoringConfig, describe_rounds_per_match
     from progress import ProgressTracker
 
@@ -22,7 +22,9 @@ class TournamentMatchResult:
         player1_score: int,
         player2_score: int,
         rounds_played: int,
+        moves: Optional[List[str]] = None,
     ):
+        self.moves = moves or []
         self.player1_name = player1_name
         self.player2_name = player2_name
         self.match_index = match_index
@@ -46,6 +48,7 @@ class TournamentMatchResult:
             "p2_score": self.player2_score,
             "winner": self.winner,
             "rounds_played": self.rounds_played,
+            "moves": self.moves,
         }
 
 
@@ -59,7 +62,7 @@ class RoundRobinTournament:
 
     def __init__(
         self,
-        players: List[Player],
+        players: List[axl.Player],
         matches_per_pairing: int = 5,
         rounds_per_match: RoundsPerMatchConfig = NormalRoundsConfig(),
         error_rate: float = 0.0,
@@ -68,7 +71,7 @@ class RoundRobinTournament:
         self.players = players
         self.matches_per_pairing = matches_per_pairing
         self.rounds_per_match = rounds_per_match
-        self.game_machine = GameMachine(error_rate=error_rate)
+        self.error_rate = error_rate
         self.scoring_config = scoring_config or TournamentScoringConfig()
 
         self.match_results: List[TournamentMatchResult] = []
@@ -81,9 +84,6 @@ class RoundRobinTournament:
             if hasattr(player, "set_console"):
                 player.set_console(self.progress.console)
 
-        # Reset all player scores
-        for p in self.players:
-            p.reset()
 
     def run_tournament(self) -> Dict[str, Any]:
         print("\n" + "=" * 60)
@@ -144,24 +144,23 @@ class RoundRobinTournament:
                 if hasattr(p2, "last_opponent_name"):
                     p2.last_opponent_name = p1.name
 
-                for round_idx in range(rounds_this_match):
-                    self.game_machine.play_game(p1, p2)
-                    self.progress.update_current(round_idx + 1)
-
+                for p in (p1, p2):
+                    if hasattr(p, "turn_callback"):
+                        p.turn_callback = lambda r: self.progress.update_current(r - 1)
+                result = play_match(
+                    p1, p2, rounds_this_match,
+                    seed=self.random.randrange(2**31), noise=self.error_rate,
+                )
+                for p in (p1, p2):
+                    if hasattr(p, "turn_callback"):
+                        p.turn_callback = None
+                self.progress.update_current(rounds_this_match)
                 self.progress.update_overall(overall_match_count)
-                s1 = p1.score
-                s2 = p2.score
+                s1, s2 = result.score1, result.score2
 
-                # Finish match for both players
-                if hasattr(p1, "finish_game") and "opponent_score" in p1.finish_game.__code__.co_varnames:
-                    p1.finish_game(opponent_score=s2)
-                else:
-                    p1.finish_game()
-
-                if hasattr(p2, "finish_game") and "opponent_score" in p2.finish_game.__code__.co_varnames:
-                    p2.finish_game(opponent_score=s1)
-                else:
-                    p2.finish_game()
+                for me, other in ((p1, p2), (p2, p1)):
+                    if hasattr(me, "finish_match"):
+                        me.finish_match(other)
 
                 # Record match
                 res = TournamentMatchResult(
@@ -171,6 +170,7 @@ class RoundRobinTournament:
                     player1_score=s1,
                     player2_score=s2,
                     rounds_played=rounds_this_match,
+                    moves=["".join(m) for m in result.moves],
                 )
                 self.match_results.append(res)
 

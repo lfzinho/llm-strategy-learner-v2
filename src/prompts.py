@@ -4,10 +4,10 @@ MATCH_LENGTH_DESCRIPTION = "Each match is Normal(10, 1) rounds long; the exact n
 
 try:
     from src.constants import Move
-    from src.player_classes import STRATEGY_DESCRIPTIONS
+    from src.opponents import STRATEGY_DESCRIPTIONS
 except ImportError:
     from constants import Move
-    from player_classes import STRATEGY_DESCRIPTIONS
+    from opponents import STRATEGY_DESCRIPTIONS
 
 
 def format_history_lines(game_history: List[Tuple[Move, Move]]) -> str:

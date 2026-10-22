@@ -19,7 +19,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 load_dotenv()
 
 from src.config import load_config
-from src.player_classes import get_strategy_class, STRATEGY_REGISTRY
+from src.opponents import make_opponent
 from src.training_battery import TrainingBattery
 from src.tournament import RoundRobinTournament
 from src.reporting.tournament_report import TournamentReporter
@@ -168,8 +168,7 @@ def main():
                     llm_agent.freeze_notes = True
                     tournament_players.append(llm_agent)
             else:
-                strat_cls = get_strategy_class(p_name)
-                tournament_players.append(strat_cls())
+                tournament_players.append(make_opponent(p_name))
 
         tournament = RoundRobinTournament(
             players=tournament_players,

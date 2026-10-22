@@ -9,16 +9,22 @@ from rich.console import Console
 import instructor
 from openai import OpenAI
 
+import axelrod as axl
+
 try:
-    from src.player import Player
     from src.constants import Move
     from src.prompts import build_turn_prompt, build_reflection_prompt
     from src.usage_tracker import UsageTracker
 except ImportError:
-    from player import Player
     from constants import Move
     from prompts import build_turn_prompt, build_reflection_prompt
     from usage_tracker import UsageTracker
+
+_GAME = axl.Game()
+
+
+def _to_move(action: axl.Action) -> Move:
+    return Move.COOPERATE if action == axl.Action.C else Move.DEFECT
 
 # Suppress benign Google GenAI SDK AFC warning
 warnings.filterwarnings("ignore", message=".*automatic function calling.*")
@@ -53,7 +59,22 @@ class LLMLongTermReflection(BaseModel):
     )
 
 
-class LLMPlayer(Player):
+class LLMPlayer(axl.Player):
+    """An LLM-driven Axelrod player.
+
+    Long-term memory (notes, playbook) lives on the instance and must survive
+    between matches, so `reset()` only clears the per-match state.
+    """
+
+    classifier = {
+        "memory_depth": float("inf"),
+        "stochastic": True,
+        "long_run_time": True,
+        "inspects_source": False,
+        "manipulates_source": False,
+        "manipulates_state": False,
+    }
+
     def __init__(
         self,
         name: str = "LLM Agent",
@@ -69,8 +90,13 @@ class LLMPlayer(Player):
         request_timeout: float = 60.0,
         console: Optional[Console] = None,
     ):
-        super().__init__(name)
+        super().__init__()
+        self.name = name
         self.strategy_name = "LLM Strategy Learner V2"
+        self.game_history: List[Tuple[Move, Move]] = []
+        self.score = 0
+        self.opp_score = 0
+        self.turn_callback = None  # called with the 1-based round number after each decision
         self.provider = (provider or os.getenv("LLM_PROVIDER", "openrouter")).lower()
         self.prompt_mode = prompt_mode
         self.custom_system_prompts = custom_system_prompts
@@ -147,11 +173,32 @@ class LLMPlayer(Player):
         self.console = console
         self.usage_tracker.set_console(console)
 
-    def play(self) -> Move:
+    def reset(self):
+        """Clears per-match state only; notes and playbook persist across matches."""
+        self.history.reset()
+        self.game_history = []
+        self.score = 0
+        self.opp_score = 0
+
+    def _sync_match_state(self, opponent: axl.Player):
+        pairs = list(zip(self.history, opponent.history))
+        self.game_history = [(_to_move(a), _to_move(b)) for a, b in pairs]
+        scores = [_GAME.score(p) for p in pairs]
+        self.score = sum(s[0] for s in scores)
+        self.opp_score = sum(s[1] for s in scores)
+
+    def strategy(self, opponent: axl.Player) -> axl.Action:
+        self._sync_match_state(opponent)
+        move = self._decide()
+        if self.turn_callback:
+            self.turn_callback(len(self.game_history) + 1)
+        return axl.Action.C if move == Move.COOPERATE else axl.Action.D
+
+    def _decide(self) -> Move:
         prompt = build_turn_prompt(
             game_history=self.game_history,
             my_score=self.score,
-            opp_score=0,  # relative score within match
+            opp_score=self.opp_score,
             long_lasting_notes=self.long_lasting_notes,
             short_lasting_notes=self.short_lasting_notes,
             master_playbook=self.master_playbook,
@@ -309,9 +356,11 @@ class LLMPlayer(Player):
         except Exception as e:
             print(f"Error during post-match reflection: {e}")
 
-    def finish_game(self, opponent_score: int = 0):
-        self.reflect_on_match(opponent_score=opponent_score)
-        super().finish_game()
+    def finish_match(self, opponent: axl.Player):
+        """Reflects on the completed match, then clears per-match state."""
+        self._sync_match_state(opponent)
+        self.reflect_on_match(opponent_score=self.opp_score)
+        self.reset()
         self.short_lasting_notes = []
 
     def set_master_playbook(self, playbook_text: str):

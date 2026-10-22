@@ -1,15 +1,15 @@
 import os
 import tempfile
-from src.player_classes import AlwaysCooperatePlayer, AlwaysDefectPlayer, TitForTatPlayer
+from src.opponents import make_opponent
 from src.tournament import RoundRobinTournament
 from src.reporting.tournament_report import TournamentReporter
 
 
 def test_mini_round_robin_tournament():
     players = [
-        AlwaysCooperatePlayer(),
-        AlwaysDefectPlayer(),
-        TitForTatPlayer(),
+        make_opponent("AlwaysCooperate"),
+        make_opponent("AlwaysDefect"),
+        make_opponent("TitForTat"),
     ]
 
     tournament = RoundRobinTournament(

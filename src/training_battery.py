@@ -5,14 +5,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from tqdm import tqdm
 
 try:
-    from src.game_machine import GameMachine
-    from src.player_classes import get_strategy_class
+    from src.match_runner import play_match
+    from src.opponents import make_opponent
     from src.dreamer import Dreamer
     from src.progress import ProgressTracker
     from src.config import NormalRoundsConfig, RoundsPerMatchConfig
 except ImportError:
-    from game_machine import GameMachine
-    from player_classes import get_strategy_class
+    from match_runner import play_match
+    from opponents import make_opponent
     from dreamer import Dreamer
     from progress import ProgressTracker
     from config import NormalRoundsConfig, RoundsPerMatchConfig
@@ -40,7 +40,7 @@ class TrainingBattery:
         self.llm_player = llm_player
         self.matches_per_strategy = matches_per_strategy
         self.rounds_per_match = rounds_per_match
-        self.game_machine = GameMachine(error_rate=error_rate)
+        self.error_rate = error_rate
         self.dreamer_enabled = dreamer_enabled
         self.dreamer_temperature = dreamer_temperature
         self.dreamer_custom_template = dreamer_custom_template
@@ -142,8 +142,6 @@ class TrainingBattery:
             if resume_strategy_index > s_idx:
                 continue
 
-            strat_cls = get_strategy_class(strat_name)
-
             try:
                 from rich.console import Console
                 from rich.rule import Rule
@@ -159,27 +157,28 @@ class TrainingBattery:
 
             for m_idx in range(start_match, self.matches_per_strategy):
                 match_global_index += 1
-                opponent = strat_cls()
-                self.llm_player.last_opponent_name = opponent.strategy_name
+                opponent = make_opponent(strat_name)
+                self.llm_player.last_opponent_name = opponent.name
                 rounds_this_match = self._sample_rounds()
 
-                self.progress.reset_current(f"Current match vs {opponent.strategy_name}", rounds_this_match)
+                self.progress.reset_current(f"Current match vs {opponent.name}", rounds_this_match)
 
-                # Play rounds
-                for round_idx in range(rounds_this_match):
-                    self.game_machine.play_game(self.llm_player, opponent)
-                    self.progress.update_current(round_idx + 1)
-
+                self.llm_player.turn_callback = lambda r: self.progress.update_current(r - 1)
+                result = play_match(
+                    self.llm_player, opponent, rounds_this_match,
+                    seed=self.random.randrange(2**31), noise=self.error_rate,
+                )
+                self.llm_player.turn_callback = None
+                self.progress.update_current(rounds_this_match)
                 self.progress.update_overall(match_global_index)
-                llm_score = self.llm_player.score
-                opp_score = opponent.score
+                llm_score = result.score1
+                opp_score = result.score2
 
                 # Snapshot notes before reflection
                 notes_before = set(self.llm_player.long_lasting_notes)
 
                 # Finish match (triggers LLM reflection and updates notes)
-                self.llm_player.finish_game(opponent_score=opp_score)
-                opponent.finish_game()
+                self.llm_player.finish_match(opponent)
 
                 # Detect newly added notes
                 new_notes = [n for n in self.llm_player.long_lasting_notes if n not in notes_before]
@@ -188,10 +187,11 @@ class TrainingBattery:
                     "global_match": match_global_index,
                     "strategy_block": strat_name,
                     "match_in_block": m_idx + 1,
-                    "opponent_strategy": opponent.strategy_name,
+                    "opponent_strategy": opponent.name,
                     "llm_score": llm_score,
                     "opponent_score": opp_score,
                     "rounds_played": rounds_this_match,
+                    "moves": ["".join(m) for m in result.moves],
                     "winner": "LLM" if llm_score > opp_score else ("Opponent" if opp_score > llm_score else "Draw"),
                     "new_notes": new_notes,
                     "all_long_notes": list(self.llm_player.long_lasting_notes),
