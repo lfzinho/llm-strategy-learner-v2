@@ -1,6 +1,6 @@
 # How do LLM agents behave in repeated social dilemmas with communication and reputation?
 
-*Research overview and Step 1 report. Status: Step 1 complete, Steps 2 and 3 to be defined.*
+*Research overview and Step 1 report. Status: Step 1 complete; Steps 2 and 3 implemented with a first experiment (Section 5).*
 
 ---
 
@@ -17,8 +17,8 @@ We study this in three steps, each adding one source of social complexity to the
 | Step | Setting | What is new | Status |
 |---|---|---|---|
 | 1 | One LLM agent against fixed, classical strategies | A measurable baseline; how information and memory affect play | **Done (this document)** |
-| 2 | Several LLM agents playing each other, with messages before each round | Communication ("cheap talk"), possible deception | Implemented in `ipd-society`; experiments pending |
-| 3 | A population of agents with a public record of who betrayed whom | Reputation and third-party observation | Implemented in `ipd-society`; experiments pending |
+| 2 | Several LLM agents playing each other, with messages before each round | Communication ("cheap talk"), possible deception | Implemented in `ipd-society`; first experiment run (Section 5) |
+| 3 | A population of agents with a public record of who betrayed whom | Reputation and third-party observation | Implemented in `ipd-society`; first experiment run (Section 5) |
 
 The ordering is deliberate. Step 1 gives a controlled setting where the optimal play is known, so any weakness of the LLM can be measured exactly. Steps 2 and 3 remove that ground truth in exchange for realism, so we want to arrive there with a trusted measurement toolkit and a known baseline of how a single agent behaves.
 
@@ -143,7 +143,7 @@ A suite of 102 offline tests (using a deterministic `mock` provider and a stubbe
 
 ## 3. Step 2: LLM agents playing each other, with communication
 
-**Implemented in the sibling project `../ipd-society`; no real-model experiments yet.**
+**Implemented in the sibling project `../ipd-society`; first experiment in Section 5.**
 
 The single agent is replaced by a small society (LLM agents plus Axelrod strategies, some of which can be chatty or
 deceptive). Every pair plays a match each episode. Before each round (or only before a match, or never) partners swap
@@ -154,7 +154,7 @@ believe a known liar, and does belief respond to experience (trust ratings and e
 
 ## 4. Step 3: a population with reputation
 
-**Implemented in `../ipd-society`; no real-model experiments yet.**
+**Implemented in `../ipd-society`; first experiment in Section 5.**
 
 A public ledger records who played what against whom. Agents can be shown a scoreboard (cooperation rate and betrayal
 count per agent) or the full ledger (a partner's recent matches round by round, with betrayals marked), and optionally
@@ -169,6 +169,27 @@ them and reports mean ± standard deviation. See `ipd-society/README.md` for the
 **Status of the evidence:** the harness is tested offline (55 tests) and has had one tiny run with a local 3B model
 (20 calls, 0 failures). That shows the pipeline works with a real model; it says nothing yet about LLM behaviour. The
 experiments in the project's "Suggested next experiments" section are the next step.
+
+---
+
+## 5. Steps 2 and 3: first experiment
+
+*Full article, tables and caveats: `../ipd-society/README.md`, section "Results". Summary here.*
+
+A five-agent society (three haiku-5.5 agents, an honest Tit For Tat, a deceptive Defector), 20 matches of 4 rounds per run, four conditions (baseline, talk, watch, talk + watch), 3 seeds each, 3,986 calls, 0 failures, roughly $1.3.
+
+| Condition | Cooperation (mean ± sd) | Points/round, LLM agents |
+|---|---|---|
+| baseline | 22% ± 14 | 1.68 |
+| talk | 41% ± 3 | 2.12 |
+| watch | 9% ± 4 | 1.34 |
+| talk + watch | 24% ± 19 (23%, 42%, 5% by seed) | 1.77 |
+
+* **Talk helps.** Messages raised cooperation in every seed. A promise of Alpha was met with Alpha about half the time; a promise of Beta was never met with Alpha.
+* **A verifiable record hurt.** The ledger alone lowered cooperation, and combined with talk it made outcomes seed-dependent (one seed collapsed to 5%). The mechanism (a punishment spiral with no way to repair a reputation) is a hypothesis, not yet checked in the traces.
+* **Limits.** Three seeds, a short known horizon (strong end-game defection), one model, one population. Treat these as leads.
+
+Compared with Step 1: informed, a single model plays near the optimum; in a group with no information it cooperates only moderately, and talk and records push it in different directions.
 
 ---
 

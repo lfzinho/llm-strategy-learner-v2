@@ -237,6 +237,28 @@ pytest          # 102 tests, about 20 seconds, no network
 
 ---
 
+## Where this fits: the research programme
+
+This repository is **Step 1** of a three-step study of the question *how do LLM agents behave in repeated social dilemmas with communication and reputation?* (full write-up: `docs/research/research-overview.md`; related work: `docs/research/literature-review.md`).
+
+| Step | Setting | Where | Status |
+|---|---|---|---|
+| 1 | One LLM against fixed classical strategies; how much does the information in the prompt matter? | this repository | done, results above |
+| 2 | Several LLM agents that can **talk** before each move | sibling project `../ipd-society` | first experiment run |
+| 3 | A society with a public **record** of who did what to whom | sibling project `../ipd-society` | first experiment run |
+
+**What Step 1 established.** Against fixed opponents a capable model (haiku-5.5) plays almost optimally when told who it faces (99% of the best achievable score) and falls to 76-84% when it is not, because it cannot identify the opponent from play alone (7-8% accuracy without a list of candidates). Small local models over-cooperate instead. Step 1 also built the tools that Steps 2 and 3 reuse: neutral Alpha/Beta wording, composable prompts, the Park-style memory stream, tracing, fallbacks and checkpoints.
+
+**What Steps 2 and 3 found so far** (haiku-5.5, five-agent society, 3 seeds, short 4-round matches; details and caveats in `../ipd-society/README.md`, section "Results"):
+
+* messages before each round raised cooperation from 22% to 41%, and a partner's announced Beta was never met with cooperation;
+* a public ledger on its own *lowered* cooperation (9%), and ledger plus messages was unstable (42% in one seed, 5% in another);
+* the LLM agents out-earned the scripted agents in every condition.
+
+These are early results from a small experiment, not conclusions. The contrast with Step 1 is the main thread: informed, a model plays well alone; uninformed and in a group, its behaviour depends strongly on what the other agents can say and see.
+
+---
+
 ## Notes
 
 * `docs/LLM Instructions.md` is the original sketch the tiers were built from; `prompts.toml` is the maintained version.
